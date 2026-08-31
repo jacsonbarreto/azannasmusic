@@ -8,7 +8,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios",
-    version="2.1.0"
+    version="2.2.0"
 )
 
 app.add_middleware(
@@ -22,6 +22,12 @@ app.add_middleware(
 COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
 HAS_COOKIES = os.path.exists(COOKIE_PATH)
 
+CHROME_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+}
+
 YTDL_SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
@@ -29,6 +35,7 @@ YTDL_SEARCH_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'ytsearch15',
+    'http_headers': CHROME_HEADERS,
 }
 if HAS_COOKIES:
     YTDL_SEARCH_OPTIONS['cookiefile'] = COOKIE_PATH
@@ -38,17 +45,18 @@ YTDL_EXTRACT_OPTIONS = {
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
+    'http_headers': CHROME_HEADERS,
 }
 if HAS_COOKIES:
     YTDL_EXTRACT_OPTIONS['cookiefile'] = COOKIE_PATH
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": "Azannas Music Engine", "has_cookies": HAS_COOKIES}
+    return {"status": "ok", "app": "Azannas Music Engine", "has_cookies": HAS_COOKIES, "version": "2.2.0"}
 
 @app.get("/version")
 def version_check():
-    return {"version": "2.1.0", "has_cookies": HAS_COOKIES}
+    return {"version": "2.2.0", "has_cookies": HAS_COOKIES}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -106,18 +114,14 @@ def proxy_download(track_id: str, request: Request):
             with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
                 info = ydl.extract_info(url, download=False)
                 direct_audio_url = info.get("url")
-                ytdl_headers = info.get("http_headers", {})
+                ytdl_headers = info.get("http_headers", CHROME_HEADERS)
         except Exception as ex1:
             print("Primary extract failed, trying fallback options:", ex1)
             fallback_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android', 'ios'],
-                    }
-                }
+                'http_headers': CHROME_HEADERS,
             }
             if HAS_COOKIES:
                 fallback_opts['cookiefile'] = COOKIE_PATH
@@ -125,7 +129,7 @@ def proxy_download(track_id: str, request: Request):
             with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
                 info2 = ydl2.extract_info(url, download=False)
                 direct_audio_url = info2.get("url")
-                ytdl_headers = info2.get("http_headers", {})
+                ytdl_headers = info2.get("http_headers", CHROME_HEADERS)
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -135,7 +139,7 @@ def proxy_download(track_id: str, request: Request):
         if range_header:
             ytdl_headers['Range'] = range_header
 
-        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=20)
+        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25)
         
         def iterfile():
             for chunk in resp.iter_content(chunk_size=16384):
