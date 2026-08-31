@@ -8,7 +8,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 app.add_middleware(
@@ -19,6 +19,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
+HAS_COOKIES = os.path.exists(COOKIE_PATH)
+
 YTDL_SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
@@ -26,32 +29,26 @@ YTDL_SEARCH_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'ytsearch15',
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['tv_embedded', 'android_creator', 'android'],
-        }
-    }
 }
+if HAS_COOKIES:
+    YTDL_SEARCH_OPTIONS['cookiefile'] = COOKIE_PATH
 
 YTDL_EXTRACT_OPTIONS = {
     'format': 'bestaudio[ext=m4a]/bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['tv_embedded', 'android_creator', 'android'],
-        }
-    }
 }
+if HAS_COOKIES:
+    YTDL_EXTRACT_OPTIONS['cookiefile'] = COOKIE_PATH
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": "Azannas Music Engine", "version": "2.0-tv_embedded"}
+    return {"status": "ok", "app": "Azannas Music Engine", "has_cookies": HAS_COOKIES}
 
 @app.get("/version")
 def version_check():
-    return {"version": "2.0-tv_embedded"}
+    return {"version": "2.1.0", "has_cookies": HAS_COOKIES}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -118,10 +115,13 @@ def proxy_download(track_id: str, request: Request):
                 'no_warnings': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android_creator', 'android'],
+                        'player_client': ['android', 'ios'],
                     }
                 }
             }
+            if HAS_COOKIES:
+                fallback_opts['cookiefile'] = COOKIE_PATH
+
             with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
                 info2 = ydl2.extract_info(url, download=False)
                 direct_audio_url = info2.get("url")
