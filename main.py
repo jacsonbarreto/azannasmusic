@@ -1,0 +1,114 @@
+import os
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+import yt_dlp
+import requests
+
+app = FastAPI(
+    title="Azannas Music Engine API",
+    description="Motor de busca, extração e streaming sem anúncios",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+YTDL_SEARCH_OPTIONS = {
+    'format': 'bestaudio/best',
+    'noplaylist': True,
+    'extract_flat': 'in_playlist',
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'ytsearch15',
+}
+
+YTDL_EXTRACT_OPTIONS = {
+    'format': 'bestaudio[ext=m4a]/bestaudio/best',
+    'noplaylist': True,
+    'quiet': True,
+    'no_warnings': True,
+}
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "app": "Azannas Music Engine"}
+
+@app.get("/search")
+def search_tracks(q: str = Query(..., description="Termo de busca")):
+    try:
+        with yt_dlp.YoutubeDL(YTDL_SEARCH_OPTIONS) as ydl:
+            results = ydl.extract_info(f"ytsearch15:{q}", download=False)
+            tracks = []
+            if results and 'entries' in results:
+                for entry in results['entries']:
+                    if not entry:
+                        continue
+                    tracks.append({
+                        "id": entry.get("id"),
+                        "title": entry.get("title", "Sem Título"),
+                        "artist": entry.get("uploader", "Artista Desconhecido"),
+                        "duration": entry.get("duration", 0),
+                        "thumbnail_url": entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg"
+                    })
+            return {"query": q, "results": tracks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/stream/{track_id}")
+def get_stream_url(track_id: str):
+    try:
+        url = f"https://www.youtube.com/watch?v={track_id}"
+        with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+            stream_url = info.get("url")
+
+            if not stream_url:
+                raise HTTPException(status_code=404, detail="Stream não localizado.")
+                
+            return {
+                "id": track_id,
+                "title": info.get("title"),
+                "artist": info.get("uploader"),
+                "duration": info.get("duration"),
+                "thumbnail_url": info.get("thumbnail"),
+                "stream_url": stream_url
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/download/{track_id}")
+def proxy_download(track_id: str):
+    try:
+        url = f"https://www.youtube.com/watch?v={track_id}"
+        with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+            direct_audio_url = info.get("url")
+
+            if not direct_audio_url:
+                raise HTTPException(status_code=404, detail="Áudio não encontrado.")
+            
+            def iterfile():
+                with requests.get(direct_audio_url, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        yield chunk
+
+            headers = {
+                'Content-Disposition': f'attachment; filename="{track_id}.m4a"',
+                'Content-Type': 'audio/mp4'
+            }
+            return StreamingResponse(iterfile(), headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
