@@ -28,7 +28,8 @@ YTDL_SEARCH_OPTIONS = {
     'default_search': 'ytsearch15',
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'mweb'],
+            'player_client': ['android', 'ios'],
+            'player_skip': ['webpage', 'configs'],
         }
     }
 }
@@ -40,7 +41,8 @@ YTDL_EXTRACT_OPTIONS = {
     'no_warnings': True,
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios', 'mweb'],
+            'player_client': ['android', 'ios'],
+            'player_skip': ['webpage', 'configs'],
         }
     }
 }
@@ -98,45 +100,61 @@ def get_stream_url(track_id: str):
 def proxy_download(track_id: str, request: Request):
     try:
         url = f"https://www.youtube.com/watch?v={track_id}"
-        with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-            direct_audio_url = info.get("url")
-            ytdl_headers = info.get("http_headers", {})
+        direct_audio_url = None
+        ytdl_headers = {}
 
-            if not direct_audio_url:
-                raise HTTPException(status_code=404, detail="Áudio não encontrado.")
-            
-            # Forward Range header if present
-            range_header = request.headers.get("range")
-            if range_header:
-                ytdl_headers['Range'] = range_header
-
-            resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=15)
-            
-            def iterfile():
-                for chunk in resp.iter_content(chunk_size=16384):
-                    yield chunk
-
-            response_headers = {
-                'Content-Disposition': f'attachment; filename="{track_id}.m4a"',
-                'Content-Type': 'audio/mp4',
-                'Accept-Ranges': 'bytes',
+        # 1. Primary Extraction with Android/iOS player_skip
+        try:
+            with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
+                info = ydl.extract_info(url, download=False)
+                direct_audio_url = info.get("url")
+                ytdl_headers = info.get("http_headers", {})
+        except Exception as ex1:
+            print("Primary extract failed, trying fallback options:", ex1)
+            fallback_opts = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
             }
+            with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
+                info2 = ydl2.extract_info(url, download=False)
+                direct_audio_url = info2.get("url")
+                ytdl_headers = info2.get("http_headers", {})
 
-            content_length = resp.headers.get('content-length')
-            if content_length:
-                response_headers['Content-Length'] = content_length
+        if not direct_audio_url:
+            raise HTTPException(status_code=404, detail="Áudio não encontrado.")
+        
+        # Forward Range header if present
+        range_header = request.headers.get("range")
+        if range_header:
+            ytdl_headers['Range'] = range_header
 
-            content_range = resp.headers.get('content-range')
-            if content_range:
-                response_headers['Content-Range'] = content_range
+        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=20)
+        
+        def iterfile():
+            for chunk in resp.iter_content(chunk_size=16384):
+                yield chunk
 
-            return StreamingResponse(
-                iterfile(),
-                status_code=resp.status_code,
-                headers=response_headers,
-                media_type='audio/mp4'
-            )
+        response_headers = {
+            'Content-Disposition': f'attachment; filename="{track_id}.m4a"',
+            'Content-Type': 'audio/mp4',
+            'Accept-Ranges': 'bytes',
+        }
+
+        content_length = resp.headers.get('content-length')
+        if content_length:
+            response_headers['Content-Length'] = content_length
+
+        content_range = resp.headers.get('content-range')
+        if content_range:
+            response_headers['Content-Range'] = content_range
+
+        return StreamingResponse(
+            iterfile(),
+            status_code=resp.status_code,
+            headers=response_headers,
+            media_type='audio/mp4'
+        )
     except Exception as e:
         print(f"Download Error for {track_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
