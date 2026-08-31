@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import yt_dlp
@@ -26,6 +26,11 @@ YTDL_SEARCH_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'ytsearch15',
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'mweb'],
+        }
+    }
 }
 
 YTDL_EXTRACT_OPTIONS = {
@@ -33,6 +38,11 @@ YTDL_EXTRACT_OPTIONS = {
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'ios', 'mweb'],
+        }
+    }
 }
 
 @app.get("/health")
@@ -58,6 +68,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
                     })
             return {"query": q, "results": tracks}
     except Exception as e:
+        print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stream/{track_id}")
@@ -80,35 +91,57 @@ def get_stream_url(track_id: str):
                 "stream_url": stream_url
             }
     except Exception as e:
+        print("Stream error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/download/{track_id}")
-def proxy_download(track_id: str):
+def proxy_download(track_id: str, request: Request):
     try:
         url = f"https://www.youtube.com/watch?v={track_id}"
         with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
             info = ydl.extract_info(url, download=False)
             direct_audio_url = info.get("url")
+            ytdl_headers = info.get("http_headers", {})
 
             if not direct_audio_url:
                 raise HTTPException(status_code=404, detail="Áudio não encontrado.")
             
-            def iterfile():
-                with requests.get(direct_audio_url, stream=True) as r:
-                    r.raise_for_status()
-                    for chunk in r.iter_content(chunk_size=8192):
-                        yield chunk
+            # Forward Range header if present
+            range_header = request.headers.get("range")
+            if range_header:
+                ytdl_headers['Range'] = range_header
 
-            headers = {
+            resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=15)
+            
+            def iterfile():
+                for chunk in resp.iter_content(chunk_size=16384):
+                    yield chunk
+
+            response_headers = {
                 'Content-Disposition': f'attachment; filename="{track_id}.m4a"',
-                'Content-Type': 'audio/mp4'
+                'Content-Type': 'audio/mp4',
+                'Accept-Ranges': 'bytes',
             }
-            return StreamingResponse(iterfile(), headers=headers)
+
+            content_length = resp.headers.get('content-length')
+            if content_length:
+                response_headers['Content-Length'] = content_length
+
+            content_range = resp.headers.get('content-range')
+            if content_range:
+                response_headers['Content-Range'] = content_range
+
+            return StreamingResponse(
+                iterfile(),
+                status_code=resp.status_code,
+                headers=response_headers,
+                media_type='audio/mp4'
+            )
     except Exception as e:
+        print(f"Download Error for {track_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
