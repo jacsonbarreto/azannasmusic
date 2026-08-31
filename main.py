@@ -8,7 +8,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -47,7 +47,11 @@ YTDL_EXTRACT_OPTIONS = {
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": "Azannas Music Engine"}
+    return {"status": "ok", "app": "Azannas Music Engine", "version": "2.0-tv_embedded"}
+
+@app.get("/version")
+def version_check():
+    return {"version": "2.0-tv_embedded"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
