@@ -28,8 +28,7 @@ YTDL_SEARCH_OPTIONS = {
     'default_search': 'ytsearch15',
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios'],
-            'player_skip': ['webpage', 'configs'],
+            'player_client': ['tv_embedded', 'android_creator', 'android'],
         }
     }
 }
@@ -41,8 +40,7 @@ YTDL_EXTRACT_OPTIONS = {
     'no_warnings': True,
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios'],
-            'player_skip': ['webpage', 'configs'],
+            'player_client': ['tv_embedded', 'android_creator', 'android'],
         }
     }
 }
@@ -103,7 +101,6 @@ def proxy_download(track_id: str, request: Request):
         direct_audio_url = None
         ytdl_headers = {}
 
-        # 1. Primary Extraction with Android/iOS player_skip
         try:
             with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -115,6 +112,11 @@ def proxy_download(track_id: str, request: Request):
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android_creator', 'android'],
+                    }
+                }
             }
             with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
                 info2 = ydl2.extract_info(url, download=False)
