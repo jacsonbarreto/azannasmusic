@@ -116,20 +116,12 @@ def get_engine_mode():
     """Quick check to test if Proxy is working or if Engine is in fallback mode."""
     if RESIDENTIAL_PROXY_URL:
         try:
-            # Fast test ping to proxy
-            opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'socket_timeout': 4,
-                'proxy': RESIDENTIAL_PROXY_URL,
-                'http_headers': CHROME_HEADERS,
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info("ytsearch1:test", download=False)
-                if info and info.get('entries'):
-                    return {"mode": "proxy", "description": "Conectado via Proxy Residencial (Rio de Janeiro)"}
-        except Exception:
-            pass
+            proxies = {"http": RESIDENTIAL_PROXY_URL, "https": RESIDENTIAL_PROXY_URL}
+            resp = requests.get("https://www.youtube.com", proxies=proxies, headers=CHROME_HEADERS, timeout=3)
+            if resp.status_code == 200:
+                return {"mode": "proxy", "description": "Conectado via Proxy Residencial (Rio de Janeiro)"}
+        except Exception as e:
+            print("Mode proxy check failed:", e)
     return {"mode": "fallback", "description": "Conectado via Conexão Direta (Fallback Cookies)"}
 
 @app.get("/search")
