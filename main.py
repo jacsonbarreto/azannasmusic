@@ -100,16 +100,37 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "has_proxy": bool(RESIDENTIAL_PROXY_URL),
-        "version": "2.4.0"
+        "version": "2.5.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "2.4.0",
+        "version": "2.5.0",
         "has_cookies": HAS_COOKIES,
         "has_proxy": bool(RESIDENTIAL_PROXY_URL)
     }
+
+@app.get("/mode")
+def get_engine_mode():
+    """Quick check to test if Proxy is working or if Engine is in fallback mode."""
+    if RESIDENTIAL_PROXY_URL:
+        try:
+            # Fast test ping to proxy
+            opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 4,
+                'proxy': RESIDENTIAL_PROXY_URL,
+                'http_headers': CHROME_HEADERS,
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info("ytsearch1:test", download=False)
+                if info and info.get('entries'):
+                    return {"mode": "proxy", "description": "Conectado via Proxy Residencial (Rio de Janeiro)"}
+        except Exception:
+            pass
+    return {"mode": "fallback", "description": "Conectado via Conexão Direta (Fallback Cookies)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -122,7 +143,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
                 tracks = parse_tracks(results)
                 if tracks:
                     print("Search succeeded via Residential Proxy.")
-                    return {"query": q, "results": tracks}
+                    return {"query": q, "results": tracks, "mode": "proxy"}
         except Exception as e:
             print(f"Proxy search failed ({e}). Retrying direct search without proxy...")
 
@@ -133,7 +154,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
             print("Search succeeded via Direct Connection (Fallback).")
-            return {"query": q, "results": tracks}
+            return {"query": q, "results": tracks, "mode": "fallback"}
     except Exception as e:
         print("Search error (Direct fallback):", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -157,7 +178,8 @@ def get_stream_url(track_id: str):
                         "artist": info.get("uploader"),
                         "duration": info.get("duration"),
                         "thumbnail_url": info.get("thumbnail"),
-                        "stream_url": stream_url
+                        "stream_url": stream_url,
+                        "mode": "proxy"
                     }
         except Exception as e:
             print(f"Proxy stream extract failed ({e}). Retrying direct extract without proxy...")
@@ -179,7 +201,8 @@ def get_stream_url(track_id: str):
                 "artist": info.get("uploader"),
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
-                "stream_url": stream_url
+                "stream_url": stream_url,
+                "mode": "fallback"
             }
     except Exception as e:
         print("Stream error (Direct fallback):", e)
