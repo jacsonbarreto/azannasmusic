@@ -48,7 +48,7 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-def get_ytdl_search_opts():
+def get_ytdl_search_opts(use_proxy: bool = True):
     opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
@@ -60,11 +60,11 @@ def get_ytdl_search_opts():
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
-    if RESIDENTIAL_PROXY_URL:
+    if use_proxy and RESIDENTIAL_PROXY_URL:
         opts['proxy'] = RESIDENTIAL_PROXY_URL
     return opts
 
-def get_ytdl_extract_opts():
+def get_ytdl_extract_opts(use_proxy: bool = True):
     opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'noplaylist': True,
@@ -74,9 +74,24 @@ def get_ytdl_extract_opts():
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
-    if RESIDENTIAL_PROXY_URL:
+    if use_proxy and RESIDENTIAL_PROXY_URL:
         opts['proxy'] = RESIDENTIAL_PROXY_URL
     return opts
+
+def parse_tracks(results):
+    tracks = []
+    if results and 'entries' in results:
+        for entry in results['entries']:
+            if not entry:
+                continue
+            tracks.append({
+                "id": entry.get("id"),
+                "title": entry.get("title", "Sem Título"),
+                "artist": entry.get("uploader", "Artista Desconhecido"),
+                "duration": entry.get("duration", 0),
+                "thumbnail_url": entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg"
+            })
+    return tracks
 
 @app.get("/health")
 def health_check():
@@ -85,45 +100,71 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "has_proxy": bool(RESIDENTIAL_PROXY_URL),
-        "version": "2.3.0"
+        "version": "2.4.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "2.3.0",
+        "version": "2.4.0",
         "has_cookies": HAS_COOKIES,
         "has_proxy": bool(RESIDENTIAL_PROXY_URL)
     }
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
+    # 1. Try search with Proxy if configured
+    if RESIDENTIAL_PROXY_URL:
+        try:
+            opts = get_ytdl_search_opts(use_proxy=True)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                results = ydl.extract_info(f"ytsearch15:{q}", download=False)
+                tracks = parse_tracks(results)
+                if tracks:
+                    print("Search succeeded via Residential Proxy.")
+                    return {"query": q, "results": tracks}
+        except Exception as e:
+            print(f"Proxy search failed ({e}). Retrying direct search without proxy...")
+
+    # 2. Fallback search without proxy (direct connection using cookies.txt)
     try:
-        opts = get_ytdl_search_opts()
+        opts = get_ytdl_search_opts(use_proxy=False)
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
-            tracks = []
-            if results and 'entries' in results:
-                for entry in results['entries']:
-                    if not entry:
-                        continue
-                    tracks.append({
-                        "id": entry.get("id"),
-                        "title": entry.get("title", "Sem Título"),
-                        "artist": entry.get("uploader", "Artista Desconhecido"),
-                        "duration": entry.get("duration", 0),
-                        "thumbnail_url": entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg"
-                    })
+            tracks = parse_tracks(results)
+            print("Search succeeded via Direct Connection (Fallback).")
             return {"query": q, "results": tracks}
     except Exception as e:
-        print("Search error:", e)
+        print("Search error (Direct fallback):", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stream/{track_id}")
 def get_stream_url(track_id: str):
+    url = f"https://www.youtube.com/watch?v={track_id}"
+    
+    # 1. Try extract with Proxy if configured
+    if RESIDENTIAL_PROXY_URL:
+        try:
+            opts = get_ytdl_extract_opts(use_proxy=True)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                stream_url = info.get("url")
+                if stream_url:
+                    print("Stream extract succeeded via Residential Proxy.")
+                    return {
+                        "id": track_id,
+                        "title": info.get("title"),
+                        "artist": info.get("uploader"),
+                        "duration": info.get("duration"),
+                        "thumbnail_url": info.get("thumbnail"),
+                        "stream_url": stream_url
+                    }
+        except Exception as e:
+            print(f"Proxy stream extract failed ({e}). Retrying direct extract without proxy...")
+
+    # 2. Fallback extract without proxy (direct connection using cookies.txt)
     try:
-        url = f"https://www.youtube.com/watch?v={track_id}"
-        opts = get_ytdl_extract_opts()
+        opts = get_ytdl_extract_opts(use_proxy=False)
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             stream_url = info.get("url")
@@ -131,6 +172,7 @@ def get_stream_url(track_id: str):
             if not stream_url:
                 raise HTTPException(status_code=404, detail="Stream não localizado.")
                 
+            print("Stream extract succeeded via Direct Connection (Fallback).")
             return {
                 "id": track_id,
                 "title": info.get("title"),
@@ -140,7 +182,7 @@ def get_stream_url(track_id: str):
                 "stream_url": stream_url
             }
     except Exception as e:
-        print("Stream error:", e)
+        print("Stream error (Direct fallback):", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/download/{track_id}")
@@ -149,22 +191,28 @@ def proxy_download(track_id: str, request: Request):
         url = f"https://www.youtube.com/watch?v={track_id}"
         direct_audio_url = None
         ytdl_headers = {}
+        used_proxy = False
 
-        try:
-            opts = get_ytdl_extract_opts()
+        # 1. Try with proxy first
+        if RESIDENTIAL_PROXY_URL:
+            try:
+                opts = get_ytdl_extract_opts(use_proxy=True)
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    direct_audio_url = info.get("url")
+                    ytdl_headers = info.get("http_headers", CHROME_HEADERS)
+                    used_proxy = True
+            except Exception as ex1:
+                print("Primary proxy download extract failed, trying direct connection:", ex1)
+
+        # 2. Direct extract fallback
+        if not direct_audio_url:
+            opts = get_ytdl_extract_opts(use_proxy=False)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 direct_audio_url = info.get("url")
                 ytdl_headers = info.get("http_headers", CHROME_HEADERS)
-        except Exception as ex1:
-            print("Primary extract failed, trying fallback options:", ex1)
-            fallback_opts = get_ytdl_extract_opts()
-            fallback_opts['format'] = 'bestaudio/best'
-
-            with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
-                info2 = ydl2.extract_info(url, download=False)
-                direct_audio_url = info2.get("url")
-                ytdl_headers = info2.get("http_headers", CHROME_HEADERS)
+                used_proxy = False
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -174,7 +222,7 @@ def proxy_download(track_id: str, request: Request):
         if range_header:
             ytdl_headers['Range'] = range_header
 
-        proxies_dict = {"http": RESIDENTIAL_PROXY_URL, "https": RESIDENTIAL_PROXY_URL} if RESIDENTIAL_PROXY_URL else None
+        proxies_dict = {"http": RESIDENTIAL_PROXY_URL, "https": RESIDENTIAL_PROXY_URL} if (used_proxy and RESIDENTIAL_PROXY_URL) else None
         resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25, proxies=proxies_dict)
         
         def iterfile():
