@@ -1,4 +1,5 @@
 import os
+import base64
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -8,7 +9,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios",
-    version="2.2.0"
+    version="2.3.0"
 )
 
 app.add_middleware(
@@ -20,7 +21,26 @@ app.add_middleware(
 )
 
 COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
+
+# Check if Base64 encoded cookies are passed via environment variable
+COOKIES_B64 = os.environ.get("COOKIES_B64")
+if COOKIES_B64:
+    try:
+        decoded_cookies = base64.b64decode(COOKIES_B64).decode("utf-8")
+        with open(COOKIE_PATH, "w", encoding="utf-8") as f:
+            f.write(decoded_cookies)
+        print("Successfully loaded cookies.txt from COOKIES_B64 environment variable.")
+    except Exception as e:
+        print(f"Error decoding COOKIES_B64: {e}")
+
 HAS_COOKIES = os.path.exists(COOKIE_PATH)
+
+# Check if Residential Proxy URL is configured (e.g., http://user:pass@p.webshare.io:80)
+RESIDENTIAL_PROXY_URL = os.environ.get("RESIDENTIAL_PROXY_URL") or os.environ.get("HTTP_PROXY") or os.environ.get("WEB_PROXY")
+if RESIDENTIAL_PROXY_URL:
+    print("Residential Proxy enabled for yt-dlp.")
+else:
+    print("No Residential Proxy specified. Running direct connection.")
 
 CHROME_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -28,40 +48,59 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-YTDL_SEARCH_OPTIONS = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'extract_flat': 'in_playlist',
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'ytsearch15',
-    'http_headers': CHROME_HEADERS,
-}
-if HAS_COOKIES:
-    YTDL_SEARCH_OPTIONS['cookiefile'] = COOKIE_PATH
+def get_ytdl_search_opts():
+    opts = {
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'extract_flat': 'in_playlist',
+        'quiet': True,
+        'no_warnings': True,
+        'default_search': 'ytsearch15',
+        'http_headers': CHROME_HEADERS,
+    }
+    if HAS_COOKIES:
+        opts['cookiefile'] = COOKIE_PATH
+    if RESIDENTIAL_PROXY_URL:
+        opts['proxy'] = RESIDENTIAL_PROXY_URL
+    return opts
 
-YTDL_EXTRACT_OPTIONS = {
-    'format': 'bestaudio[ext=m4a]/bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'http_headers': CHROME_HEADERS,
-}
-if HAS_COOKIES:
-    YTDL_EXTRACT_OPTIONS['cookiefile'] = COOKIE_PATH
+def get_ytdl_extract_opts():
+    opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'http_headers': CHROME_HEADERS,
+    }
+    if HAS_COOKIES:
+        opts['cookiefile'] = COOKIE_PATH
+    if RESIDENTIAL_PROXY_URL:
+        opts['proxy'] = RESIDENTIAL_PROXY_URL
+    return opts
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": "Azannas Music Engine", "has_cookies": HAS_COOKIES, "version": "2.2.0"}
+    return {
+        "status": "ok",
+        "app": "Azannas Music Engine",
+        "has_cookies": HAS_COOKIES,
+        "has_proxy": bool(RESIDENTIAL_PROXY_URL),
+        "version": "2.3.0"
+    }
 
 @app.get("/version")
 def version_check():
-    return {"version": "2.2.0", "has_cookies": HAS_COOKIES}
+    return {
+        "version": "2.3.0",
+        "has_cookies": HAS_COOKIES,
+        "has_proxy": bool(RESIDENTIAL_PROXY_URL)
+    }
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
     try:
-        with yt_dlp.YoutubeDL(YTDL_SEARCH_OPTIONS) as ydl:
+        opts = get_ytdl_search_opts()
+        with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = []
             if results and 'entries' in results:
@@ -84,7 +123,8 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
 def get_stream_url(track_id: str):
     try:
         url = f"https://www.youtube.com/watch?v={track_id}"
-        with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
+        opts = get_ytdl_extract_opts()
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             stream_url = info.get("url")
 
@@ -111,20 +151,15 @@ def proxy_download(track_id: str, request: Request):
         ytdl_headers = {}
 
         try:
-            with yt_dlp.YoutubeDL(YTDL_EXTRACT_OPTIONS) as ydl:
+            opts = get_ytdl_extract_opts()
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 direct_audio_url = info.get("url")
                 ytdl_headers = info.get("http_headers", CHROME_HEADERS)
         except Exception as ex1:
             print("Primary extract failed, trying fallback options:", ex1)
-            fallback_opts = {
-                'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
-                'http_headers': CHROME_HEADERS,
-            }
-            if HAS_COOKIES:
-                fallback_opts['cookiefile'] = COOKIE_PATH
+            fallback_opts = get_ytdl_extract_opts()
+            fallback_opts['format'] = 'bestaudio/best'
 
             with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
                 info2 = ydl2.extract_info(url, download=False)
@@ -139,7 +174,8 @@ def proxy_download(track_id: str, request: Request):
         if range_header:
             ytdl_headers['Range'] = range_header
 
-        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25)
+        proxies_dict = {"http": RESIDENTIAL_PROXY_URL, "https": RESIDENTIAL_PROXY_URL} if RESIDENTIAL_PROXY_URL else None
+        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25, proxies=proxies_dict)
         
         def iterfile():
             for chunk in resp.iter_content(chunk_size=16384):
