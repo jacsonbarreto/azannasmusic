@@ -357,8 +357,9 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Search track via search_youtube
-                tracks = search_youtube(search_term, limit=1)
+                # Search track via search_tracks
+                search_res = search_tracks(q=search_term)
+                tracks = search_res.get("results", []) if isinstance(search_res, dict) else []
                 if not tracks:
                     return {
                         "version": "1.0",
