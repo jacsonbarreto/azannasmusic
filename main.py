@@ -22,13 +22,13 @@ app.add_middleware(
 
 FAST_YTDL_ARGS = {
     'youtube': {
-        'player_client': ['android', 'web']
+        'player_client': ['ios', 'mweb', 'android', 'web']
     }
 }
 
 def get_ytdl_search_opts(limit: int = 15):
     return {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best/m4a/mp4',
         'noplaylist': True,
         'extract_flat': 'in_playlist',
         'quiet': True,
@@ -39,7 +39,7 @@ def get_ytdl_search_opts(limit: int = 15):
 
 def get_ytdl_extract_opts():
     return {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best/m4a/mp4',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
