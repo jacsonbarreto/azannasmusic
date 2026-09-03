@@ -9,7 +9,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine)",
-    version="5.0.0"
+    version="5.1.0"
 )
 
 app.add_middleware(
@@ -47,7 +47,7 @@ def get_ytdl_search_opts(limit: int = 15):
 
 def get_ytdl_extract_opts():
     return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
@@ -80,13 +80,13 @@ def health_check():
         "status": "ok",
         "app": "Azannas Music Engine",
         "mode": "direct_alexa_stream",
-        "version": "5.0.0"
+        "version": "5.1.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "5.0.0",
+        "version": "5.1.0",
         "mode": "direct_alexa_stream"
     }
 
