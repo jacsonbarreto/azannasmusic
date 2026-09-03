@@ -9,8 +9,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Cookies Engine)",
-    version="3.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
+    version="3.1.0"
 )
 
 app.add_middleware(
@@ -42,6 +42,14 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
+# InnerTube Android/iOS client configuration for fast extraction without proxy/webpage blocking
+FAST_YTDL_ARGS = {
+    'youtube': {
+        'player_client': ['android', 'ios'],
+        'player_skip': ['webpage', 'configs']
+    }
+}
+
 def get_ytdl_search_opts(limit: int = 15):
     opts = {
         'format': 'bestaudio/best',
@@ -51,6 +59,7 @@ def get_ytdl_search_opts(limit: int = 15):
         'no_warnings': True,
         'default_search': f'ytsearch{limit}',
         'http_headers': CHROME_HEADERS,
+        'extractor_args': FAST_YTDL_ARGS,
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
@@ -63,6 +72,7 @@ def get_ytdl_extract_opts():
         'quiet': True,
         'no_warnings': True,
         'http_headers': CHROME_HEADERS,
+        'extractor_args': FAST_YTDL_ARGS,
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
@@ -89,21 +99,21 @@ def health_check():
         "status": "ok",
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
-        "mode": "direct_cookies",
-        "version": "3.0.0"
+        "mode": "direct_innertube",
+        "version": "3.1.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.0.0",
+        "version": "3.1.0",
         "has_cookies": HAS_COOKIES,
-        "mode": "direct_cookies"
+        "mode": "direct_innertube"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_cookies", "description": "Conexão Direta Otimizada via Cookies"}
+    return {"mode": "direct_innertube", "description": "Conexão Direta Otimizada via InnerTube Android/iOS"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -112,7 +122,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_cookies"}
+            return {"query": q, "results": tracks, "mode": "direct_innertube"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -134,7 +144,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_cookies"
+                "mode": "direct_innertube"
             }
     except Exception as e:
         print("Stream extract error:", e)
