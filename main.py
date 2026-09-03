@@ -378,8 +378,18 @@ async def alexa_webhook(request: Request):
                 artist = best.get("artist", "Azannas Music")
                 thumb = best.get("thumbnail_url", f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg")
 
-                # Public HTTPS stream URL via /download/{track_id}
-                audio_stream_url = f"https://azannas-music-app.onrender.com/download/{track_id}"
+                # Extract direct HTTPS stream URL for instant Alexa Echo playback
+                direct_audio_url = None
+                try:
+                    opts = get_ytdl_extract_opts(use_proxy=False)
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+                        direct_audio_url = info.get("url")
+                except Exception as ex_alexa:
+                    print("Alexa direct stream extract failed:", ex_alexa)
+
+                if not direct_audio_url:
+                    direct_audio_url = f"https://azannas-music-app.onrender.com/download/{track_id}"
 
                 return {
                     "version": "1.0",
@@ -395,7 +405,7 @@ async def alexa_webhook(request: Request):
                                 "audioItem": {
                                     "stream": {
                                         "token": track_id,
-                                        "url": audio_stream_url,
+                                        "url": direct_audio_url,
                                         "offsetInMilliseconds": 0
                                     },
                                     "metadata": {
