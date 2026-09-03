@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine v9.0.0)",
-    version="9.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Modo Fallback + Cookies v9.1.0)",
+    version="9.1.0"
 )
 
 app.add_middleware(
@@ -20,31 +20,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FAST_YTDL_ARGS = {
-    'youtube': {
-        'player_client': ['ios', 'mweb', 'android', 'web']
-    }
+COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
+HAS_COOKIES = os.path.exists(COOKIE_PATH)
+
+CHROME_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
 def get_ytdl_search_opts(limit: int = 15):
-    return {
-        'format': 'bestaudio/best/m4a/mp4',
+    opts = {
+        'format': 'bestaudio/best',
         'noplaylist': True,
         'extract_flat': 'in_playlist',
         'quiet': True,
         'no_warnings': True,
         'default_search': f'ytsearch{limit}',
-        'extractor_args': FAST_YTDL_ARGS,
+        'http_headers': CHROME_HEADERS,
     }
+    if HAS_COOKIES:
+        opts['cookiefile'] = COOKIE_PATH
+    return opts
 
 def get_ytdl_extract_opts():
-    return {
-        'format': 'bestaudio/best/m4a/mp4',
+    opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
-        'extractor_args': FAST_YTDL_ARGS,
+        'http_headers': CHROME_HEADERS,
     }
+    if HAS_COOKIES:
+        opts['cookiefile'] = COOKIE_PATH
+    return opts
 
 def parse_tracks(results):
     tracks = []
@@ -70,20 +79,22 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "direct_alexa_fast_redirect",
-        "version": "9.0.0"
+        "has_cookies": HAS_COOKIES,
+        "mode": "fallback",
+        "version": "9.1.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "9.0.0",
-        "mode": "direct_alexa_fast_redirect"
+        "version": "9.1.0",
+        "mode": "fallback",
+        "has_cookies": HAS_COOKIES
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_alexa_fast_redirect", "description": "Redirecionamento Ultrarrápido HTTP 307 para Alexa Echo"}
+    return {"mode": "fallback", "description": "Conexão Direta + Cookies (Luz Amarela Neon)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -92,7 +103,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_alexa_fast_redirect"}
+            return {"query": q, "results": tracks, "mode": "fallback"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -101,8 +112,9 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
 def get_stream_url(track_id: str):
     try:
         opts = get_ytdl_extract_opts()
+        url = f"https://www.youtube.com/watch?v={track_id}"
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            res = ydl.extract_info(url, download=False)
             if res:
                 stream_url = res.get("url")
                 if stream_url:
@@ -113,7 +125,7 @@ def get_stream_url(track_id: str):
                         "duration": res.get("duration"),
                         "thumbnail_url": res.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
                         "stream_url": stream_url,
-                        "mode": "direct_fast"
+                        "mode": "fallback"
                     }
         raise HTTPException(status_code=404, detail="Stream não localizado.")
     except Exception as e:
@@ -124,13 +136,14 @@ def get_stream_url(track_id: str):
 def proxy_download(track_id: str, request: Request):
     try:
         opts = get_ytdl_extract_opts()
+        url = f"https://www.youtube.com/watch?v={track_id}"
         direct_audio_url = None
         ytdl_headers = {}
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            res = ydl.extract_info(url, download=False)
             if res:
                 direct_audio_url = res.get("url")
-                ytdl_headers = res.get("http_headers", {})
+                ytdl_headers = res.get("http_headers", CHROME_HEADERS)
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -215,13 +228,14 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
 
 @app.get("/alexa-stream/{track_id}")
 def alexa_stream_proxy(track_id: str, request: Request):
-    """Redireciona a Alexa diretamente para o CDN de alta velocidade do YouTube (googlevideo.com) em <2.5s."""
+    """Redireciona a Alexa diretamente para o CDN do YouTube (googlevideo.com)."""
     try:
         opts = get_ytdl_extract_opts()
+        url = f"https://www.youtube.com/watch?v={track_id}"
         direct_audio_url = None
 
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            res = ydl.extract_info(url, download=False)
             if res:
                 direct_audio_url = res.get("url")
 
@@ -235,7 +249,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.5s) e redirecionamento de streaming."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida e redirecionamento de streaming."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -274,7 +288,6 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (<1.5s)
                 search_opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
@@ -303,7 +316,6 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Endpoint de streaming com redirecionamento direto para Alexa (HTTP 307 para googlevideo)
                 stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
 
                 if not thumb:
