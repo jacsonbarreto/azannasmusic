@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Modo Fallback + Cookies v9.1.0)",
-    version="9.1.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Multi-Client Engine v9.2.0)",
+    version="9.2.0"
 )
 
 app.add_middleware(
@@ -19,9 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
-HAS_COOKIES = os.path.exists(COOKIE_PATH)
 
 CHROME_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -36,7 +33,7 @@ FAST_YTDL_ARGS = {
 }
 
 def get_ytdl_search_opts(limit: int = 15):
-    opts = {
+    return {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'extract_flat': 'in_playlist',
@@ -46,12 +43,9 @@ def get_ytdl_search_opts(limit: int = 15):
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
-    return opts
 
 def get_ytdl_extract_opts():
-    opts = {
+    return {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
@@ -59,9 +53,6 @@ def get_ytdl_extract_opts():
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
-    return opts
 
 def parse_tracks(results):
     tracks = []
@@ -87,22 +78,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "has_cookies": HAS_COOKIES,
         "mode": "fallback",
-        "version": "9.1.0"
+        "version": "9.2.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "9.1.0",
-        "mode": "fallback",
-        "has_cookies": HAS_COOKIES
+        "version": "9.2.0",
+        "mode": "fallback"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "fallback", "description": "Conexão Direta + Cookies (Luz Amarela Neon)"}
+    return {"mode": "fallback", "description": "Conexão Direta Multicliente (Luz Amarela Neon)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -119,47 +108,20 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
 @app.get("/stream/{track_id}")
 def get_stream_url(track_id: str):
     try:
+        opts = get_ytdl_extract_opts()
         url = f"https://www.youtube.com/watch?v={track_id}"
-        
-        # Stage 1: Try primary extraction (with cookies if available)
-        try:
-            opts = get_ytdl_extract_opts()
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                res = ydl.extract_info(url, download=False)
-                if res and res.get("url"):
-                    return {
-                        "id": track_id,
-                        "title": res.get("title"),
-                        "artist": res.get("uploader"),
-                        "duration": res.get("duration"),
-                        "thumbnail_url": res.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
-                        "stream_url": res.get("url"),
-                        "mode": "fallback"
-                    }
-        except Exception as ex1:
-            print(f"Primary stream extract with cookies failed for {track_id}, trying clean fallback: {ex1}")
-
-        # Stage 2: Fallback extraction without cookies using multi-client InnerTube
-        opts_fallback = {
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'extractor_args': FAST_YTDL_ARGS,
-        }
-        with yt_dlp.YoutubeDL(opts_fallback) as ydl2:
-            res2 = ydl2.extract_info(url, download=False)
-            if res2 and res2.get("url"):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=False)
+            if res and res.get("url"):
                 return {
                     "id": track_id,
-                    "title": res2.get("title"),
-                    "artist": res2.get("uploader"),
-                    "duration": res2.get("duration"),
-                    "thumbnail_url": res2.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
-                    "stream_url": res2.get("url"),
+                    "title": res.get("title"),
+                    "artist": res.get("uploader"),
+                    "duration": res.get("duration"),
+                    "thumbnail_url": res.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
+                    "stream_url": res.get("url"),
                     "mode": "fallback"
                 }
-
         raise HTTPException(status_code=404, detail="Stream não localizado.")
     except Exception as e:
         print("Stream extract error:", e)
@@ -168,35 +130,15 @@ def get_stream_url(track_id: str):
 @app.get("/download/{track_id}")
 def proxy_download(track_id: str, request: Request):
     try:
+        opts = get_ytdl_extract_opts()
         url = f"https://www.youtube.com/watch?v={track_id}"
         direct_audio_url = None
         ytdl_headers = {}
-
-        # Stage 1: Try primary extraction (with cookies)
-        try:
-            opts = get_ytdl_extract_opts()
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                res = ydl.extract_info(url, download=False)
-                if res and res.get("url"):
-                    direct_audio_url = res.get("url")
-                    ytdl_headers = res.get("http_headers", CHROME_HEADERS)
-        except Exception as ex1:
-            print(f"Primary download extract failed for {track_id}, trying fallback: {ex1}")
-
-        # Stage 2: Fallback extraction without cookies
-        if not direct_audio_url:
-            opts_fallback = {
-                'format': 'bestaudio/best',
-                'noplaylist': True,
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': FAST_YTDL_ARGS,
-            }
-            with yt_dlp.YoutubeDL(opts_fallback) as ydl2:
-                res2 = ydl2.extract_info(url, download=False)
-                if res2 and res2.get("url"):
-                    direct_audio_url = res2.get("url")
-                    ytdl_headers = res2.get("http_headers", CHROME_HEADERS)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=False)
+            if res and res.get("url"):
+                direct_audio_url = res.get("url")
+                ytdl_headers = res.get("http_headers", CHROME_HEADERS)
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
