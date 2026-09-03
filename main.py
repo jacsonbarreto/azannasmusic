@@ -28,7 +28,7 @@ CHROME_HEADERS = {
 
 FAST_YTDL_ARGS = {
     'youtube': {
-        'player_client': ['ios', 'mweb', 'android', 'web']
+        'player_client': ['android', 'android_embedded', 'tv_embedded']
     }
 }
 
