@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine v8.0.0)",
-    version="8.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine v9.0.0)",
+    version="9.0.0"
 )
 
 app.add_middleware(
@@ -71,20 +71,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "direct_alexa_redirect",
-        "version": "8.0.0"
+        "mode": "direct_alexa_fast_redirect",
+        "version": "9.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "8.0.0",
-        "mode": "direct_alexa_redirect"
+        "version": "9.0.0",
+        "mode": "direct_alexa_fast_redirect"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_alexa_redirect", "description": "Redirecionamento Direto HTTPS para Alexa Echo (<1.5s)"}
+    return {"mode": "direct_alexa_fast_redirect", "description": "Redirecionamento Ultrarrápido HTTP 307 para Alexa Echo"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -93,30 +93,31 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_alexa_redirect"}
+            return {"query": q, "results": tracks, "mode": "direct_alexa_fast_redirect"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stream/{track_id}")
 def get_stream_url(track_id: str):
-    url = f"https://www.youtube.com/watch?v={track_id}"
     try:
         opts = get_ytdl_extract_opts()
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            stream_url = info.get("url")
-            if not stream_url:
-                raise HTTPException(status_code=404, detail="Stream não localizado.")
-            return {
-                "id": track_id,
-                "title": info.get("title"),
-                "artist": info.get("uploader"),
-                "duration": info.get("duration"),
-                "thumbnail_url": info.get("thumbnail"),
-                "stream_url": stream_url,
-                "mode": "direct_alexa_redirect"
-            }
+            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
+            if res and 'entries' in res and res['entries']:
+                entry = res['entries'][0]
+                stream_url = entry.get("url")
+                if stream_url:
+                    return {
+                        "id": track_id,
+                        "title": entry.get("title"),
+                        "artist": entry.get("uploader"),
+                        "duration": entry.get("duration"),
+                        "thumbnail_url": entry.get("thumbnail"),
+                        "stream_url": stream_url,
+                        "mode": "direct_alexa_fast_redirect"
+                    }
+        raise HTTPException(status_code=404, detail="Stream não localizado.")
     except Exception as e:
         print("Stream extract error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -124,12 +125,15 @@ def get_stream_url(track_id: str):
 @app.get("/download/{track_id}")
 def proxy_download(track_id: str, request: Request):
     try:
-        url = f"https://www.youtube.com/watch?v={track_id}"
         opts = get_ytdl_extract_opts()
+        direct_audio_url = None
+        ytdl_headers = {}
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            direct_audio_url = info.get("url")
-            ytdl_headers = info.get("http_headers", {})
+            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
+            if res and 'entries' in res and res['entries']:
+                entry = res['entries'][0]
+                direct_audio_url = entry.get("url")
+                ytdl_headers = entry.get("http_headers", {})
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -214,13 +218,15 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
 
 @app.get("/alexa-stream/{track_id}")
 def alexa_stream_proxy(track_id: str, request: Request):
-    """Redireciona a Alexa diretamente para o CDN de alta velocidade do YouTube (googlevideo.com)."""
+    """Redireciona a Alexa diretamente para o CDN de alta velocidade do YouTube (googlevideo.com) em <2.5s."""
     try:
-        url = f"https://www.youtube.com/watch?v={track_id}"
         opts = get_ytdl_extract_opts()
+        direct_audio_url = None
+
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            direct_audio_url = info.get("url")
+            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
+            if res and 'entries' in res and res['entries']:
+                direct_audio_url = res['entries'][0].get("url")
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Audio stream não localizado.")
