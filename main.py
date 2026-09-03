@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Android InnerTube Engine)",
-    version="4.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine)",
+    version="5.0.0"
 )
 
 app.add_middleware(
@@ -26,7 +26,6 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-# Android InnerTube client configuration for direct, fast, cookie-free extraction
 FAST_YTDL_ARGS = {
     'youtube': {
         'player_client': ['android'],
@@ -80,20 +79,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "direct_android_innertube",
-        "version": "4.0.0"
+        "mode": "direct_alexa_stream",
+        "version": "5.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "4.0.0",
-        "mode": "direct_android_innertube"
+        "version": "5.0.0",
+        "mode": "direct_alexa_stream"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_android_innertube", "description": "Conexão Direta Otimizada via InnerTube Android (Sem Proxy / Sem Cookies)"}
+    return {"mode": "direct_alexa_stream", "description": "Streaming Direto para Alexa AudioPlayer (<1.0s webhook response)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -102,7 +101,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_android_innertube"}
+            return {"query": q, "results": tracks, "mode": "direct_alexa_stream"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -124,7 +123,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_android_innertube"
+                "mode": "direct_alexa_stream"
             }
     except Exception as e:
         print("Stream extract error:", e)
@@ -271,7 +270,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta ultrarrápida (<2.5s) e URL direta de streaming."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.0s) e stream inline otimizado."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -310,7 +309,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (1.1s)
+                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (<1.0s)
                 search_opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
@@ -339,19 +338,8 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android (1.3s)
-                direct_audio_url = None
-                try:
-                    extract_opts = get_ytdl_extract_opts()
-                    with yt_dlp.YoutubeDL(extract_opts) as ydl:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={best_track_id}", download=False)
-                        direct_audio_url = info.get("url")
-                except Exception as ex_extract:
-                    print(f"Direct stream extract failed for Alexa ({best_track_id}):", ex_extract)
-
-                # Fallback para o endpoint do Render se a URL direta falhar
-                if not direct_audio_url:
-                    direct_audio_url = f"https://azannas-music-app.onrender.com/download/{best_track_id}"
+                # Endpoint de streaming dedicado para Alexa (inline audio/mp4 sem attachment)
+                stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
 
                 if not thumb:
                     thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
@@ -370,7 +358,7 @@ async def alexa_webhook(request: Request):
                                 "audioItem": {
                                     "stream": {
                                         "token": best_track_id,
-                                        "url": direct_audio_url,
+                                        "url": stream_url,
                                         "offsetInMilliseconds": 0
                                     },
                                     "metadata": {
