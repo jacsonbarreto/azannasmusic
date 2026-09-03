@@ -314,15 +314,85 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
         print("Lyrics search error:", e)
         return {"status": "error", "detail": str(e)}
 
+@app.get("/alexa-stream/{track_id}")
+def alexa_stream_proxy(track_id: str, request: Request):
+    """Proxy de áudio otimizado especificamente para Amazon Alexa AudioPlayer (inline streaming sem attachment)."""
+    try:
+        url = f"https://www.youtube.com/watch?v={track_id}"
+        direct_audio_url = None
+        ytdl_headers = {}
+        used_proxy = False
+
+        # 1. Tentar extração via Proxy Residencial (Webshare) primeiro
+        if RESIDENTIAL_PROXY_URL:
+            try:
+                opts = get_ytdl_extract_opts(use_proxy=True)
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    direct_audio_url = info.get("url")
+                    ytdl_headers = info.get("http_headers", CHROME_HEADERS)
+                    used_proxy = True
+            except Exception as ex1:
+                print(f"Alexa stream extract with proxy failed for {track_id}: {ex1}")
+
+        # 2. Fallback para conexão direta sem proxy
+        if not direct_audio_url:
+            opts = get_ytdl_extract_opts(use_proxy=False)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                direct_audio_url = info.get("url")
+                ytdl_headers = info.get("http_headers", CHROME_HEADERS)
+                used_proxy = False
+
+        if not direct_audio_url:
+            raise HTTPException(status_code=404, detail="Audio stream não localizado.")
+
+        # Repassar cabeçalho Range enviado pela Alexa se existir
+        range_header = request.headers.get("range")
+        if range_header:
+            ytdl_headers['Range'] = range_header
+
+        proxies_dict = {"http": RESIDENTIAL_PROXY_URL, "https": RESIDENTIAL_PROXY_URL} if (used_proxy and RESIDENTIAL_PROXY_URL) else None
+        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25, proxies=proxies_dict)
+
+        def iterfile():
+            for chunk in resp.iter_content(chunk_size=16384):
+                yield chunk
+
+        # Cabeçalhos limpos para o AudioPlayer nativo da Alexa (inline streaming)
+        response_headers = {
+            'Content-Type': 'audio/mp4',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+        }
+
+        content_length = resp.headers.get('content-length')
+        if content_length:
+            response_headers['Content-Length'] = content_length
+
+        content_range = resp.headers.get('content-range')
+        if content_range:
+            response_headers['Content-Range'] = content_range
+
+        return StreamingResponse(
+            iterfile(),
+            status_code=resp.status_code,
+            headers=response_headers,
+            media_type='audio/mp4'
+        )
+    except Exception as e:
+        print(f"Alexa Stream Proxy Error for {track_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook with AudioPlayer Directive."""
+    """Alexa Custom Skill Webhook com suporte a AudioPlayer."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
         req_type = req_data.get("type", "")
 
-        # 1. LaunchRequest ("Alexa, abre o Azannas Music")
+        # 1. LaunchRequest ("Alexa, abre o Azannas Music" ou "Alexa, abre minha caixinha")
         if req_type == "LaunchRequest":
             return {
                 "version": "1.0",
@@ -335,7 +405,7 @@ async def alexa_webhook(request: Request):
                 }
             }
 
-        # 2. IntentRequest ("Alexa, pede pro Azannas Music tocar ...")
+        # 2. IntentRequest ("Alexa, tocar X na minha caixinha")
         if req_type == "IntentRequest":
             intent = req_data.get("intent", {})
             intent_name = intent.get("name", "")
@@ -351,13 +421,13 @@ async def alexa_webhook(request: Request):
                         "response": {
                             "outputSpeech": {
                                 "type": "PlainText",
-                                "text": "Por favor, diga o nome da música ou artista que deseja ouvir no Azannas Music."
+                                "text": "Por favor, diga o nome da música ou artista que deseja ouvir."
                             },
                             "shouldEndSession": False
                         }
                     }
 
-                # Search track via search_tracks
+                # Buscar faixa no engine
                 search_res = search_tracks(q=search_term)
                 tracks = search_res.get("results", []) if isinstance(search_res, dict) else []
                 if not tracks:
@@ -378,18 +448,8 @@ async def alexa_webhook(request: Request):
                 artist = best.get("artist", "Azannas Music")
                 thumb = best.get("thumbnail_url", f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg")
 
-                # Extract direct HTTPS stream URL for instant Alexa Echo playback
-                direct_audio_url = None
-                try:
-                    opts = get_ytdl_extract_opts(use_proxy=False)
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
-                        direct_audio_url = info.get("url")
-                except Exception as ex_alexa:
-                    print("Alexa direct stream extract failed:", ex_alexa)
-
-                if not direct_audio_url:
-                    direct_audio_url = f"https://azannas-music-app.onrender.com/download/{track_id}"
+                # URL de streaming direto otimizada para Alexa via Render Proxy Endpoint
+                direct_audio_url = f"https://azannas-music-app.onrender.com/alexa-stream/{track_id}"
 
                 return {
                     "version": "1.0",
@@ -441,13 +501,20 @@ async def alexa_webhook(request: Request):
                     "response": {
                         "outputSpeech": {
                             "type": "PlainText",
-                            "text": "Você pode pedir para o Azannas Music tocar qualquer música ou artista. Por exemplo: fale, Alexa, pede pro Azannas Music tocar Legião Urbana."
+                            "text": "Você pode pedir para tocar qualquer música ou artista na sua caixinha. Por exemplo: fale, Alexa, tocar Legião Urbana na minha caixinha."
                         },
                         "shouldEndSession": False
                     }
                 }
 
-        # Default fallback response for AudioPlayer events
+        # Tratar eventos do AudioPlayer (PlaybackStarted, PlaybackFailed, etc.) sem shouldEndSession
+        if req_type.startswith("AudioPlayer."):
+            return {
+                "version": "1.0",
+                "response": {}
+            }
+
+        # Resposta padrão
         return {
             "version": "1.0",
             "response": {
@@ -471,3 +538,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
