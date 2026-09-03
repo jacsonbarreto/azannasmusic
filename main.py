@@ -29,6 +29,12 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
+FAST_YTDL_ARGS = {
+    'youtube': {
+        'player_client': ['ios', 'mweb', 'android', 'web']
+    }
+}
+
 def get_ytdl_search_opts(limit: int = 15):
     opts = {
         'format': 'bestaudio/best',
@@ -38,6 +44,7 @@ def get_ytdl_search_opts(limit: int = 15):
         'no_warnings': True,
         'default_search': f'ytsearch{limit}',
         'http_headers': CHROME_HEADERS,
+        'extractor_args': FAST_YTDL_ARGS,
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
@@ -45,11 +52,12 @@ def get_ytdl_search_opts(limit: int = 15):
 
 def get_ytdl_extract_opts():
     opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
         'http_headers': CHROME_HEADERS,
+        'extractor_args': FAST_YTDL_ARGS,
     }
     if HAS_COOKIES:
         opts['cookiefile'] = COOKIE_PATH
