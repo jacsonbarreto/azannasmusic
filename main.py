@@ -1,6 +1,5 @@
 import os
 import re
-import base64
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -9,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.9.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Android InnerTube Engine)",
+    version="4.0.0"
 )
 
 app.add_middleware(
@@ -21,30 +20,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-EMBEDDED_COOKIES_B64 = "IyBOZXRzY2FwZSBIVFRQIENvb2tpZSBGaWxlCiMgVGhpcyBmaWxlIGlzIGdlbmVyYXRlZCBieSB5dC1kbHAuICBEbyBub3QgZWRpdC4KCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODA0MDE0NDM4CURFVklDRV9JTkZPCUNoeE9lbGswVFZSTk5FNTZXVFJOYWxrMVRucEJNVTFxWnpSUFFUMDlFT2FLNTlRR0dPYUs1OVFHCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxNzg4NDcxNDk5CUdQUwkxCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODA0MDAwNTU4CU5JRAk1MzQ9UVZLSS12cnFrUkxjRVBOckJGZkZIRWdUbnpac0FOQ2w3dUtaMUU1WjFsQmJGTkdZUUZNOXlLMTM2d3ZqS0c0Q3hiR0dyY2ZiMkxrM1lHLWNmU0Q2c2x4bVBNR1VOMkdnbFJZLVlCQzdaMnZjUmNGYnl0YldmWkhNREpJVWJxcFl0X0V4ZWotYVhYbHRoOWcxM01VWnFaSTJjSG5ueWptVEZNaHd3WlJWR3hKbFYwUTJGZkZRUHJPXzlmNXNaVkZhSS1Wdl9XaDRfWFJqenplM2JCcmxZSnItWjFqeGJBCi55b3V0dWJlLmNvbQlUUlVFCS8JRkFMU0UJMAlQUkVGCWY3PTEwMCZobD1lbiZnbD1VUyZ0ej1VVEMmZjU9MjAwMDAKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTAJU09DUwlDQUkKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MDQwMjIxOTEJVklTSVRPUl9JTkZPMV9MSVZFCTFqQWR2UWFEUkdRCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODA0MDIyMTkxCVZJU0lUT1JfUFJJVkFDWV9NRVRBREFUQQlDZ0pDVWhJRUdnQWdRUSUzRCUzRAoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMAlZU0MJR0Nra2JpY0VVcTQKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MTk3NDA0MzEJX19TZWN1cmUtMVBTSURUUwlzaWR0cy1DalVCWE13NDFVa01VaWN0cl92SE5lQWRYdHFfM1ZqNkpOR1VmanNHOURDYkpmZ3hNVFJMWlZINFBMVXY4ejgzY01kTU84YnFFeEFBCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODIxNzg0NTk4CV9fU2VjdXJlLTNQQVBJU0lECXRnak1FWFhRb0ZpV1lxb20vQUREQk9XNjhmOXFXVmw5YUQKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MjE3ODQ1OTgJX19TZWN1cmUtM1BTSUQJZy5hMDAwQndsYVAxSlJTZE1kMHloR05hUkt0WEpNYWhXS1JtUDZib1AxN2J3bk5fV0RyclYwSHlKZ3lMZ0dwV1gxM2xIQU1RMFEzQUFDZ1lLQVNvU0FSTVNGUUhHWDJNaWd4ZTVhMXhKVHZLV1R4RDN1dHpMaGhvVkFVRjh5S3J0RWJMUndqck94OXdrMEwzMGt2TjMwMDc2Ci55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODE5NzQwODY2CV9fU2VjdXJlLTNQU0lEQ0MJQUtFeVh6WHBLc0JUc1ZhOEdfQU9EMmVsLXdOZ1dOLTl0MUZYbUxGVVd2U0ZrNHBWaDVrTFlsVDlvUXJXYVFsbzNEbW8xM2ZaaTBuQwoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTgxOTc0MDQzMQlfX1NlY3VyZS0zUFNJRFRTCXNpZHRzLUNqVUJYTXc0MVVrTVVpY3RyX3ZITmVBZFh0cV8zVmo2Sk5HVWZqc0c5RENiSmZneE1UUkxaVkg0UExVdjh6ODNjTWRNTzhicUV4QUEKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE3OTExMzc5OTYJX19TZWN1cmUtQlVDS0VUCUNOWUYKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MDQwMTY4NTMJX19TZWN1cmUtUk9MTE9VVF9UT0tFTglDSm1vNzUtcy1lNnEwUUVRNHZXNC1KRzhqQU1ZbGJPUTRwYlRsZ00lM0QKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MDQwMTY4NTMJX19TZWN1cmUtWU5JRAkyMS5ZVD1KSU1wQndsSEpXUWJtd2pJenU1NWVoeVpyTkRFWkVuZVhTY2t4NVZGaEpQTXhRMnpNVHU5ZTMwRzdCeDVoanlIbHJxSVpwRkpYWHNDS0tmc0VQMkVJaVRpTmJGUVFqOUp0R0JPN0xQcFRiQnN0VGY2TFY5bjVqb0YyYkRJaVRvMVhuOXdUSENVWHlZWFhrSkRnb2F5ZmpYWTg3b0VKWnpWNWVZU1k5TG5JNXo0RWhYXzlsRXJDTUs3aFRqTGt1bldsSU5wR2NNY2ZPNk4zX0FfYTZNVjJPbElrZmMwcWJIZUlkdFNpemNzUVZLbWZFX0FmYmNfb3VCMnVqam8xWXFfemtXcklDSkpTZ253cTB1V205RnJlQ2dhbU5ZYXFZOXVFdkRxeXlwRkh4Q1h2NEhhSzEyWXF3VlRsZ0plOG9fNVh5UlpHdDFsSHA2bmwxN3dwa1JkLWcKLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4NTE1MzQ0MzgJX19TZWN1cmUtWVRfVFZGQVMJdD00ODQzNTkmcz0yCi55b3V0dWJlLmNvbQlUUlVFCS8JRkFMU0UJMTgyMjY1ODEzMAlfZ2EJR0ExLjEuODg3Mjc4NjA5LjE3ODgwOTgxMzAKLnlvdXR1YmUuY29tCVRSVUUJLwlGQUxTRQkxODIyNjc0NDM3CV9nYV9WQ0dFUFk0MFZCCUdTMi4xLnMxNzg4MTE0NDM3JG8yJGcwJHQxNzg4MTE0NDM3JGo2MCRsMCRoMAoueW91dHViZS5jb20JVFJVRQkvCUZBTFNFCTE3OTU4NzQxMzAJX2djbF9hdQkxLjEuMTkzMjM1NTExNC4xNzg4MDk4MTMwLi0uLS4xNzg4MDk4MTMwLjIwMDU0NjU1NDQuMTc4ODA5ODEzMC4xNzg4MDk4MTMwCi55b3V0dWJlLmNvbQlUUlVFCS90dglUUlVFCTE4MjEyOTQ0MzgJX19TZWN1cmUtWVRfREVSUAlDSlhDb3ZYcUF3JTNEJTNECnd3dy55b3V0dWJlLmNvbQlGQUxTRQkvCVRSVUUJMTc4ODcxNDQ3NQlPVFoJODczMDMwOF82OF82NF83MzU2MF82OF80MTYzNDAKd3d3LnlvdXR1YmUuY29tCUZBTFNFCS8JRkFMU0UJMTgxOTY0MzExMAl0Yi1zZWFyY2gtdGVybS1hbmFseXNpcy1hY3Rpb24JY2xpcGJvYXJkJTdDdW5kZWZpbmVkJTdDdW5kZWZpbmVkCg=="
-
-COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
-
-# Load cookies from environment variable or embedded fallback with Unix LF line endings
-COOKIES_B64 = os.environ.get("COOKIES_B64") or EMBEDDED_COOKIES_B64
-if COOKIES_B64:
-    try:
-        decoded_cookies = base64.b64decode(COOKIES_B64).decode("utf-8").replace("\r\n", "\n")
-        with open(COOKIE_PATH, "w", encoding="utf-8", newline="\n") as f:
-            f.write(decoded_cookies)
-        print("Successfully loaded cookies.txt with Unix LF line endings.")
-    except Exception as e:
-        print(f"Error decoding COOKIES_B64: {e}")
-
-HAS_COOKIES = os.path.exists(COOKIE_PATH)
-
 CHROME_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-# Android InnerTube client configuration for direct stream URLs
+# Android InnerTube client configuration for direct, fast, cookie-free extraction
 FAST_YTDL_ARGS = {
     'youtube': {
         'player_client': ['android'],
@@ -53,7 +35,7 @@ FAST_YTDL_ARGS = {
 }
 
 def get_ytdl_search_opts(limit: int = 15):
-    opts = {
+    return {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'extract_flat': 'in_playlist',
@@ -63,12 +45,9 @@ def get_ytdl_search_opts(limit: int = 15):
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
-    return opts
 
 def get_ytdl_extract_opts():
-    opts = {
+    return {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'noplaylist': True,
         'quiet': True,
@@ -76,9 +55,6 @@ def get_ytdl_extract_opts():
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
-    return opts
 
 def parse_tracks(results):
     tracks = []
@@ -104,22 +80,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "has_cookies": HAS_COOKIES,
-        "mode": "direct_innertube_android",
-        "version": "3.9.0"
+        "mode": "direct_android_innertube",
+        "version": "4.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.9.0",
-        "has_cookies": HAS_COOKIES,
-        "mode": "direct_innertube_android"
+        "version": "4.0.0",
+        "mode": "direct_android_innertube"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_innertube_android", "description": "Conexão Direta Otimizada via InnerTube Android + Cookies Embedded"}
+    return {"mode": "direct_android_innertube", "description": "Conexão Direta Otimizada via InnerTube Android (Sem Proxy / Sem Cookies)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -128,7 +102,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_innertube_android"}
+            return {"query": q, "results": tracks, "mode": "direct_android_innertube"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -150,7 +124,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_innertube_android"
+                "mode": "direct_android_innertube"
             }
     except Exception as e:
         print("Stream extract error:", e)
@@ -365,7 +339,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android (1.0s)
+                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android (1.3s)
                 direct_audio_url = None
                 try:
                     extract_opts = get_ytdl_extract_opts()
