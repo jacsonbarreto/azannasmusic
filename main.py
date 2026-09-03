@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Single-Call Engine)",
-    version="6.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Android InnerTube Engine)",
+    version="7.0.0"
 )
 
 app.add_middleware(
@@ -19,12 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-CHROME_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-}
 
 FAST_YTDL_ARGS = {
     'youtube': {
@@ -41,7 +35,6 @@ def get_ytdl_search_opts(limit: int = 15):
         'quiet': True,
         'no_warnings': True,
         'default_search': f'ytsearch{limit}',
-        'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
 
@@ -51,7 +44,6 @@ def get_ytdl_extract_opts():
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
-        'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
 
@@ -62,6 +54,7 @@ def parse_tracks(results):
             if not entry:
                 continue
             track_id = entry.get("id")
+            # Only accept valid YouTube video IDs (11 characters)
             if not track_id or len(track_id) != 11 or track_id.startswith(("UC", "PL")):
                 continue
             tracks.append({
@@ -78,20 +71,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "direct_single_call",
-        "version": "6.0.0"
+        "mode": "direct_android_innertube",
+        "version": "7.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "6.0.0",
-        "mode": "direct_single_call"
+        "version": "7.0.0",
+        "mode": "direct_android_innertube"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_single_call", "description": "Resposta Direta para Alexa via Chamada Única (<5s)"}
+    return {"mode": "direct_android_innertube", "description": "Streaming Otimizado para Alexa (<2s response)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -100,7 +93,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_single_call"}
+            return {"query": q, "results": tracks, "mode": "direct_android_innertube"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -122,7 +115,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_single_call"
+                "mode": "direct_android_innertube"
             }
     except Exception as e:
         print("Stream extract error:", e)
@@ -136,7 +129,7 @@ def proxy_download(track_id: str, request: Request):
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             direct_audio_url = info.get("url")
-            ytdl_headers = info.get("http_headers", CHROME_HEADERS)
+            ytdl_headers = info.get("http_headers", {})
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -228,7 +221,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             direct_audio_url = info.get("url")
-            ytdl_headers = info.get("http_headers", CHROME_HEADERS)
+            ytdl_headers = info.get("http_headers", {})
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Audio stream não localizado.")
@@ -269,7 +262,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com chamada única (<5s) e URL de streaming direta."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.8s) e stream inline otimizado."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -308,23 +301,22 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Single-call busca + extração de áudio direto googlevideo via Android InnerTube
-                opts = get_ytdl_extract_opts()
+                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (<1.8s)
+                search_opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
                 artist = "Azannas Music"
                 thumb = None
-                direct_audio_url = None
 
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    res = ydl.extract_info(f"ytsearch1:{search_term}", download=False)
-                    if res and 'entries' in res and res['entries']:
-                        entry = res['entries'][0]
-                        best_track_id = entry.get("id")
-                        title = entry.get("title", search_term)
-                        artist = entry.get("uploader", "Azannas Music")
-                        thumb = entry.get("thumbnail") or (entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else None)
-                        direct_audio_url = entry.get("url")
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
+                    search_res = ydl.extract_info(f"ytsearch5:{search_term}", download=False)
+                    tracks = parse_tracks(search_res)
+                    if tracks:
+                        best = tracks[0]
+                        best_track_id = best.get("id")
+                        title = best.get("title", search_term)
+                        artist = best.get("artist", "Azannas Music")
+                        thumb = best.get("thumbnail_url")
 
                 if not best_track_id:
                     return {
@@ -338,9 +330,8 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Fallback se direct_audio_url for None
-                if not direct_audio_url:
-                    direct_audio_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
+                # Endpoint de streaming dedicado para Alexa (inline audio/mp4 sem attachment)
+                stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
 
                 if not thumb:
                     thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
@@ -359,7 +350,7 @@ async def alexa_webhook(request: Request):
                                 "audioItem": {
                                     "stream": {
                                         "token": best_track_id,
-                                        "url": direct_audio_url,
+                                        "url": stream_url,
                                         "offsetInMilliseconds": 0
                                     },
                                     "metadata": {
