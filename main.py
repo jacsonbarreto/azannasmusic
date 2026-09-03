@@ -10,7 +10,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.4.0"
+    version="3.5.0"
 )
 
 app.add_middleware(
@@ -104,13 +104,13 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube",
-        "version": "3.4.0"
+        "version": "3.5.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.4.0",
+        "version": "3.5.0",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube"
     }
@@ -295,7 +295,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.5s)."""
+    """Alexa Custom Skill Webhook com resposta direta do InnerTube CDN."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -334,14 +334,14 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Single search call (limit=5)
-                opts = get_ytdl_search_opts(limit=5)
+                # Step 1: Buscar a melhor faixa (ytsearch5)
+                search_opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
                 artist = "Azannas Music"
                 thumb = None
 
-                with yt_dlp.YoutubeDL(opts) as ydl:
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
                     search_res = ydl.extract_info(f"ytsearch5:{search_term}", download=False)
                     tracks = parse_tracks(search_res)
                     if tracks:
@@ -363,7 +363,19 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                direct_audio_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
+                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android/iOS
+                direct_audio_url = None
+                try:
+                    extract_opts = get_ytdl_extract_opts()
+                    with yt_dlp.YoutubeDL(extract_opts) as ydl:
+                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={best_track_id}", download=False)
+                        direct_audio_url = info.get("url")
+                except Exception as ex_extract:
+                    print(f"Direct stream extract failed for Alexa ({best_track_id}):", ex_extract)
+
+                # Fallback se a extração de URL falhar
+                if not direct_audio_url:
+                    direct_audio_url = f"https://azannas-music-app.onrender.com/download/{best_track_id}"
 
                 if not thumb:
                     thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
