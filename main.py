@@ -314,6 +314,148 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
         print("Lyrics search error:", e)
         return {"status": "error", "detail": str(e)}
 
+@app.post("/alexa")
+async def alexa_webhook(request: Request):
+    """Alexa Custom Skill Webhook with AudioPlayer Directive."""
+    try:
+        body = await request.json()
+        req_data = body.get("request", {})
+        req_type = req_data.get("type", "")
+
+        # 1. LaunchRequest ("Alexa, abre o Azannas Music")
+        if req_type == "LaunchRequest":
+            return {
+                "version": "1.0",
+                "response": {
+                    "outputSpeech": {
+                        "type": "PlainText",
+                        "text": "Bem-vindo ao Azannas Music! Qual música ou artista você deseja ouvir?"
+                    },
+                    "shouldEndSession": False
+                }
+            }
+
+        # 2. IntentRequest ("Alexa, pede pro Azannas Music tocar ...")
+        if req_type == "IntentRequest":
+            intent = req_data.get("intent", {})
+            intent_name = intent.get("name", "")
+
+            if intent_name in ["PlayMusicIntent", "SearchAndPlayIntent"]:
+                slots = intent.get("slots", {})
+                query_slot = slots.get("query", {}) or slots.get("song", {}) or slots.get("artist", {})
+                search_term = query_slot.get("value", "").strip()
+
+                if not search_term:
+                    return {
+                        "version": "1.0",
+                        "response": {
+                            "outputSpeech": {
+                                "type": "PlainText",
+                                "text": "Por favor, diga o nome da música ou artista que deseja ouvir no Azannas Music."
+                            },
+                            "shouldEndSession": False
+                        }
+                    }
+
+                # Search track via search_youtube
+                tracks = search_youtube(search_term, limit=1)
+                if not tracks:
+                    return {
+                        "version": "1.0",
+                        "response": {
+                            "outputSpeech": {
+                                "type": "PlainText",
+                                "text": f"Desculpe, não encontrei a música {search_term} no Azannas Music."
+                            },
+                            "shouldEndSession": True
+                        }
+                    }
+
+                best = tracks[0]
+                track_id = best.get("id")
+                title = best.get("title", search_term)
+                artist = best.get("artist", "Azannas Music")
+                thumb = best.get("thumbnail_url", f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg")
+
+                # Public HTTPS stream URL via /download/{track_id}
+                audio_stream_url = f"https://azannas-music-app.onrender.com/download/{track_id}"
+
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": f"Tocando {title} no Azannas Music."
+                        },
+                        "directives": [
+                            {
+                                "type": "AudioPlayer.Play",
+                                "playBehavior": "REPLACE_ALL",
+                                "audioItem": {
+                                    "stream": {
+                                        "token": track_id,
+                                        "url": audio_stream_url,
+                                        "offsetInMilliseconds": 0
+                                    },
+                                    "metadata": {
+                                        "title": title,
+                                        "subtitle": artist,
+                                        "art": {
+                                            "sources": [{"url": thumb}]
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                        "shouldEndSession": True
+                    }
+                }
+
+            elif intent_name in ["AMAZON.PauseIntent", "AMAZON.StopIntent", "AMAZON.CancelIntent"]:
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "directives": [
+                            {
+                                "type": "AudioPlayer.Stop"
+                            }
+                        ],
+                        "shouldEndSession": True
+                    }
+                }
+
+            elif intent_name == "AMAZON.HelpIntent":
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": "Você pode pedir para o Azannas Music tocar qualquer música ou artista. Por exemplo: fale, Alexa, pede pro Azannas Music tocar Legião Urbana."
+                        },
+                        "shouldEndSession": False
+                    }
+                }
+
+        # Default fallback response for AudioPlayer events
+        return {
+            "version": "1.0",
+            "response": {
+                "shouldEndSession": True
+            }
+        }
+    except Exception as e:
+        print("Alexa webhook error:", e)
+        return {
+            "version": "1.0",
+            "response": {
+                "outputSpeech": {
+                    "type": "PlainText",
+                    "text": "Ocorreu um erro ao processar seu pedido no Azannas Music."
+                },
+                "shouldEndSession": True
+            }
+        }
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
