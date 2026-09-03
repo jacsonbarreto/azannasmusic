@@ -2,14 +2,14 @@ import os
 import re
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 import yt_dlp
 import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Android InnerTube Engine)",
-    version="7.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (Direct Alexa Stream Engine v8.0.0)",
+    version="8.0.0"
 )
 
 app.add_middleware(
@@ -71,20 +71,20 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "direct_android_innertube",
-        "version": "7.0.0"
+        "mode": "direct_alexa_redirect",
+        "version": "8.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "7.0.0",
-        "mode": "direct_android_innertube"
+        "version": "8.0.0",
+        "mode": "direct_alexa_redirect"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_android_innertube", "description": "Streaming Otimizado para Alexa (<2s response)"}
+    return {"mode": "direct_alexa_redirect", "description": "Redirecionamento Direto HTTPS para Alexa Echo (<1.5s)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -93,7 +93,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_android_innertube"}
+            return {"query": q, "results": tracks, "mode": "direct_alexa_redirect"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,7 +115,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_android_innertube"
+                "mode": "direct_alexa_redirect"
             }
     except Exception as e:
         print("Stream extract error:", e)
@@ -183,7 +183,7 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
         if clean_artist and clean_t:
             search_query = f"{clean_artist} {clean_t}"
         elif clean_t:
-            search_query = clean_t
+            search_query = clean_track_title(query)
         elif query:
             search_query = clean_track_title(query)
         else:
@@ -214,55 +214,25 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
 
 @app.get("/alexa-stream/{track_id}")
 def alexa_stream_proxy(track_id: str, request: Request):
-    """Proxy de áudio otimizado especificamente para Amazon Alexa AudioPlayer (inline streaming sem attachment)."""
+    """Redireciona a Alexa diretamente para o CDN de alta velocidade do YouTube (googlevideo.com)."""
     try:
         url = f"https://www.youtube.com/watch?v={track_id}"
         opts = get_ytdl_extract_opts()
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             direct_audio_url = info.get("url")
-            ytdl_headers = info.get("http_headers", {})
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Audio stream não localizado.")
 
-        range_header = request.headers.get("range")
-        if range_header:
-            ytdl_headers['Range'] = range_header
-
-        resp = requests.get(direct_audio_url, headers=ytdl_headers, stream=True, timeout=25)
-
-        def iterfile():
-            for chunk in resp.iter_content(chunk_size=16384):
-                yield chunk
-
-        response_headers = {
-            'Content-Type': 'audio/mp4',
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache',
-        }
-
-        content_length = resp.headers.get('content-length')
-        if content_length:
-            response_headers['Content-Length'] = content_length
-
-        content_range = resp.headers.get('content-range')
-        if content_range:
-            response_headers['Content-Range'] = content_range
-
-        return StreamingResponse(
-            iterfile(),
-            status_code=resp.status_code,
-            headers=response_headers,
-            media_type='audio/mp4'
-        )
+        return RedirectResponse(url=direct_audio_url, status_code=307)
     except Exception as e:
-        print(f"Alexa Stream Proxy Error for {track_id}: {e}")
+        print(f"Alexa Stream Redirect Error for {track_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.8s) e stream inline otimizado."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.5s) e redirecionamento de streaming."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -301,7 +271,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (<1.8s)
+                # Step 1: Flat search para obter ID do vídeo filtrado de 11 caracteres (<1.5s)
                 search_opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
@@ -330,7 +300,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Endpoint de streaming dedicado para Alexa (inline audio/mp4 sem attachment)
+                # Endpoint de streaming com redirecionamento direto para Alexa (HTTP 307 para googlevideo)
                 stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
 
                 if not thumb:
