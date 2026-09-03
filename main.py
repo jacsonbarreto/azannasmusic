@@ -268,6 +268,47 @@ def proxy_download(track_id: str, request: Request):
         print(f"Download Error for {track_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def clean_track_title(title: str) -> str:
+    """Removes common YouTube title noise like (Official Video), [HD], etc."""
+    cleaned = re.sub(r'[\(\[\{].*?[\)\]\}]', '', title)
+    cleaned = re.sub(r'\b(official|video|lyric|lyrics|audio|hd|4k|remastered|version|clipe|oficial|ao vivo|live)\b', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+@app.get("/lyrics")
+def get_lyrics(query: str = "", artist: str = "", title: str = ""):
+    """Fetch synced (LRC) / plain lyrics from LRCLIB API."""
+    try:
+        search_query = query.strip()
+        if not search_query and (artist or title):
+            clean_title = clean_track_title(title)
+            search_query = f"{artist} {clean_title}".strip()
+        elif search_query:
+            search_query = clean_track_title(search_query)
+
+        if not search_query:
+            return {"status": "not_found", "message": "Consulta vazia."}
+
+        url = f"https://lrclib.net/api/search?q={requests.utils.quote(search_query)}"
+        resp = requests.get(url, headers={"User-Agent": "AzannasMusic/1.0"}, timeout=6)
+        
+        if resp.status_code == 200:
+            results = resp.json()
+            if results and isinstance(results, list) and len(results) > 0:
+                best = next((x for x in results if x.get("syncedLyrics")), results[0])
+                return {
+                    "status": "ok",
+                    "id": best.get("id"),
+                    "track_name": best.get("trackName"),
+                    "artist_name": best.get("artistName"),
+                    "synced_lyrics": best.get("syncedLyrics"),
+                    "plain_lyrics": best.get("plainLyrics"),
+                }
+        return {"status": "not_found", "message": "Letra não encontrada."}
+    except Exception as e:
+        print("Lyrics search error:", e)
+        return {"status": "error", "detail": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
