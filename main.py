@@ -10,7 +10,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.3.0"
+    version="3.4.0"
 )
 
 app.add_middleware(
@@ -104,13 +104,13 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube",
-        "version": "3.3.0"
+        "version": "3.4.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.3.0",
+        "version": "3.4.0",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube"
     }
@@ -295,7 +295,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com suporte a AudioPlayer."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida (<1.5s)."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -334,7 +334,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Busca ultrarrápida (ytsearch5 filtrado para id de 11 caracteres)
+                # Single search call (limit=5)
                 opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
@@ -363,18 +363,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Extrair URL direta do stream via InnerTube
-                direct_audio_url = None
-                try:
-                    extract_opts = get_ytdl_extract_opts()
-                    with yt_dlp.YoutubeDL(extract_opts) as ydl:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={best_track_id}", download=False)
-                        direct_audio_url = info.get("url")
-                except Exception as ex_extract:
-                    print(f"Direct stream extract failed for Alexa ({best_track_id}):", ex_extract)
-
-                if not direct_audio_url:
-                    direct_audio_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
+                direct_audio_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
 
                 if not thumb:
                     thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
