@@ -22,8 +22,7 @@ app.add_middleware(
 
 FAST_YTDL_ARGS = {
     'youtube': {
-        'player_client': ['android'],
-        'player_skip': ['webpage', 'configs']
+        'player_client': ['android', 'web']
     }
 }
 
@@ -103,19 +102,18 @@ def get_stream_url(track_id: str):
     try:
         opts = get_ytdl_extract_opts()
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
-            if res and 'entries' in res and res['entries']:
-                entry = res['entries'][0]
-                stream_url = entry.get("url")
+            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            if res:
+                stream_url = res.get("url")
                 if stream_url:
                     return {
                         "id": track_id,
-                        "title": entry.get("title"),
-                        "artist": entry.get("uploader"),
-                        "duration": entry.get("duration"),
-                        "thumbnail_url": entry.get("thumbnail"),
+                        "title": res.get("title"),
+                        "artist": res.get("uploader"),
+                        "duration": res.get("duration"),
+                        "thumbnail_url": res.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
                         "stream_url": stream_url,
-                        "mode": "direct_alexa_fast_redirect"
+                        "mode": "direct_fast"
                     }
         raise HTTPException(status_code=404, detail="Stream não localizado.")
     except Exception as e:
@@ -129,11 +127,10 @@ def proxy_download(track_id: str, request: Request):
         direct_audio_url = None
         ytdl_headers = {}
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
-            if res and 'entries' in res and res['entries']:
-                entry = res['entries'][0]
-                direct_audio_url = entry.get("url")
-                ytdl_headers = entry.get("http_headers", {})
+            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            if res:
+                direct_audio_url = res.get("url")
+                ytdl_headers = res.get("http_headers", {})
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Áudio não encontrado.")
@@ -224,9 +221,9 @@ def alexa_stream_proxy(track_id: str, request: Request):
         direct_audio_url = None
 
         with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(f"ytsearch1:{track_id}", download=False)
-            if res and 'entries' in res and res['entries']:
-                direct_audio_url = res['entries'][0].get("url")
+            res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+            if res:
+                direct_audio_url = res.get("url")
 
         if not direct_audio_url:
             raise HTTPException(status_code=404, detail="Audio stream não localizado.")
