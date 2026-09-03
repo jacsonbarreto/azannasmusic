@@ -10,7 +10,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.2.0"
+    version="3.3.0"
 )
 
 app.add_middleware(
@@ -84,12 +84,16 @@ def parse_tracks(results):
         for entry in results['entries']:
             if not entry:
                 continue
+            track_id = entry.get("id")
+            # Only accept valid YouTube video IDs (11 characters)
+            if not track_id or len(track_id) != 11 or track_id.startswith(("UC", "PL")):
+                continue
             tracks.append({
-                "id": entry.get("id"),
+                "id": track_id,
                 "title": entry.get("title", "Sem Título"),
                 "artist": entry.get("uploader", "Artista Desconhecido"),
                 "duration": entry.get("duration", 0),
-                "thumbnail_url": entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg"
+                "thumbnail_url": entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg"
             })
     return tracks
 
@@ -100,13 +104,13 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube",
-        "version": "3.2.0"
+        "version": "3.3.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.2.0",
+        "version": "3.3.0",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube"
     }
@@ -330,16 +334,15 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Busca e extração ultrarrápida de áudio direto (~1.2s)
-                opts = get_ytdl_search_opts(limit=1)
+                # Busca ultrarrápida (ytsearch5 filtrado para id de 11 caracteres)
+                opts = get_ytdl_search_opts(limit=5)
                 best_track_id = None
                 title = search_term
                 artist = "Azannas Music"
                 thumb = None
-                direct_audio_url = None
 
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    search_res = ydl.extract_info(f"ytsearch1:{search_term}", download=False)
+                    search_res = ydl.extract_info(f"ytsearch5:{search_term}", download=False)
                     tracks = parse_tracks(search_res)
                     if tracks:
                         best = tracks[0]
@@ -361,6 +364,7 @@ async def alexa_webhook(request: Request):
                     }
 
                 # Extrair URL direta do stream via InnerTube
+                direct_audio_url = None
                 try:
                     extract_opts = get_ytdl_extract_opts()
                     with yt_dlp.YoutubeDL(extract_opts) as ydl:
