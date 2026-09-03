@@ -10,7 +10,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.5.0"
+    version="3.6.0"
 )
 
 app.add_middleware(
@@ -42,10 +42,10 @@ CHROME_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-# InnerTube Android/iOS client configuration for fast extraction without proxy/webpage blocking
+# Android InnerTube client configuration for direct stream URLs
 FAST_YTDL_ARGS = {
     'youtube': {
-        'player_client': ['android', 'ios'],
+        'player_client': ['android'],
         'player_skip': ['webpage', 'configs']
     }
 }
@@ -103,21 +103,21 @@ def health_check():
         "status": "ok",
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
-        "mode": "direct_innertube",
-        "version": "3.5.0"
+        "mode": "direct_innertube_android",
+        "version": "3.6.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.5.0",
+        "version": "3.6.0",
         "has_cookies": HAS_COOKIES,
-        "mode": "direct_innertube"
+        "mode": "direct_innertube_android"
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "direct_innertube", "description": "Conexão Direta Otimizada via InnerTube Android/iOS"}
+    return {"mode": "direct_innertube_android", "description": "Conexão Direta Otimizada via InnerTube Android + Cookies"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -126,7 +126,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "direct_innertube"}
+            return {"query": q, "results": tracks, "mode": "direct_innertube_android"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -148,7 +148,7 @@ def get_stream_url(track_id: str):
                 "duration": info.get("duration"),
                 "thumbnail_url": info.get("thumbnail"),
                 "stream_url": stream_url,
-                "mode": "direct_innertube"
+                "mode": "direct_innertube_android"
             }
     except Exception as e:
         print("Stream extract error:", e)
@@ -363,7 +363,7 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android/iOS
+                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android
                 direct_audio_url = None
                 try:
                     extract_opts = get_ytdl_extract_opts()
