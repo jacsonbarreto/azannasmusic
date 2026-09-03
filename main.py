@@ -10,7 +10,7 @@ import requests
 app = FastAPI(
     title="Azannas Music Engine API",
     description="Motor de busca, extração e streaming sem anúncios (Direct InnerTube Engine)",
-    version="3.6.0"
+    version="3.7.0"
 )
 
 app.add_middleware(
@@ -104,13 +104,13 @@ def health_check():
         "app": "Azannas Music Engine",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube_android",
-        "version": "3.6.0"
+        "version": "3.7.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "3.6.0",
+        "version": "3.7.0",
         "has_cookies": HAS_COOKIES,
         "mode": "direct_innertube_android"
     }
@@ -295,7 +295,7 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta direta do InnerTube CDN."""
+    """Alexa Custom Skill Webhook com resposta ultrarrápida em chamada única (<2.5s)."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
@@ -334,24 +334,25 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                # Step 1: Buscar a melhor faixa (ytsearch5)
-                search_opts = get_ytdl_search_opts(limit=5)
+                # Single-call extração de busca + áudio direto googlevideo em < 2.5s
+                opts = get_ytdl_extract_opts()
                 best_track_id = None
                 title = search_term
                 artist = "Azannas Music"
                 thumb = None
+                direct_audio_url = None
 
-                with yt_dlp.YoutubeDL(search_opts) as ydl:
-                    search_res = ydl.extract_info(f"ytsearch5:{search_term}", download=False)
-                    tracks = parse_tracks(search_res)
-                    if tracks:
-                        best = tracks[0]
-                        best_track_id = best.get("id")
-                        title = best.get("title", search_term)
-                        artist = best.get("artist", "Azannas Music")
-                        thumb = best.get("thumbnail_url")
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(f"ytsearch1:{search_term}", download=False)
+                    if info and 'entries' in info and len(info['entries']) > 0:
+                        entry = info['entries'][0]
+                        best_track_id = entry.get("id")
+                        title = entry.get("title", search_term)
+                        artist = entry.get("uploader", "Azannas Music")
+                        thumb = entry.get("thumbnail") or (entry.get("thumbnails", [{}])[-1].get("url") if entry.get("thumbnails") else None)
+                        direct_audio_url = entry.get("url")
 
-                if not best_track_id:
+                if not best_track_id or not direct_audio_url:
                     return {
                         "version": "1.0",
                         "response": {
@@ -362,20 +363,6 @@ async def alexa_webhook(request: Request):
                             "shouldEndSession": True
                         }
                     }
-
-                # Step 2: Extrair a URL direta de streaming (googlevideo.com) via InnerTube Android
-                direct_audio_url = None
-                try:
-                    extract_opts = get_ytdl_extract_opts()
-                    with yt_dlp.YoutubeDL(extract_opts) as ydl:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={best_track_id}", download=False)
-                        direct_audio_url = info.get("url")
-                except Exception as ex_extract:
-                    print(f"Direct stream extract failed for Alexa ({best_track_id}):", ex_extract)
-
-                # Fallback se a extração de URL falhar
-                if not direct_audio_url:
-                    direct_audio_url = f"https://azannas-music-app.onrender.com/download/{best_track_id}"
 
                 if not thumb:
                     thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
