@@ -279,12 +279,17 @@ def clean_track_title(title: str) -> str:
 def get_lyrics(query: str = "", artist: str = "", title: str = ""):
     """Fetch synced (LRC) / plain lyrics from LRCLIB API."""
     try:
-        search_query = query.strip()
-        if not search_query and (artist or title):
-            clean_title = clean_track_title(title)
-            search_query = f"{artist} {clean_title}".strip()
-        elif search_query:
-            search_query = clean_track_title(search_query)
+        clean_artist = artist.strip() if artist and artist.strip().lower() not in ["artista desconhecido", "youtube", "vevo", "unknown artist", "none", "null"] else ""
+        clean_t = clean_track_title(title) if title else ""
+        
+        if clean_artist and clean_t:
+            search_query = f"{clean_artist} {clean_t}"
+        elif clean_t:
+            search_query = clean_t
+        elif query:
+            search_query = clean_track_title(query)
+        else:
+            search_query = ""
 
         if not search_query:
             return {"status": "not_found", "message": "Consulta vazia."}
