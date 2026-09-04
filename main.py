@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -8,8 +9,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (Direct Multi-Client Engine v9.2.0)",
-    version="9.2.0"
+    description="Motor de busca, extração e streaming sem anúncios (AllanProxies BR Engine v10.0.0)",
+    version="10.0.0"
 )
 
 app.add_middleware(
@@ -20,20 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import base64
-
-EMBEDDED_COOKIES_B64 = "IyBOZXRzY2FwZSBIVFRQIENvb2tpZSBGaWxlDQojIFRoaXMgZmlsZSBpcyBnZW5lcmF0ZWQgYnkgeXQtZGxwLiAgRG8gbm90IGVkaXQuDQoNCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODA0MDE0NDM4CURFVklDRV9JTkZPCUNoeE9lbGswVFZSTk5FNTZXVFJOYWxrMVRucEJNVTFxWnpSUFFUMDlFT2FLNTlRR0dPYUs1OVFHDQoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTc4ODQ3NzI1OAlHUFMJMQ0KLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MDQwMDA1NTgJTklECTUzND1RVktJLXZycWtSTGNFUE5yQkZmRkhFZ1RuelpzQU5DbDd1S1oxRTVaMWxCYkZOR1lRRk05eUsxMzZ3dmpLRzRDeGJHR3JjZmIyTGszWUctY2ZTRDZzbHhtUE1HVU4yR2dsUlktWUJDN1oydmNSY0ZieXRiV2ZaSE1ESklVYnFwWXRfRXhlai1hWFhsdGg5ZzEzTVVacVpJMmNIbm55am1URk1od3daUlZHeEpsVjBRMkZmRlFQck9fOWY1c1pWRmFJLVZ2X1doNF9YUmp6emUzYkJybFlKci1aMWp4YkANCi55b3V0dWJlLmNvbQlUUlVFCS8JRkFMU0UJMAlQUkVGCWY3PTEwMCZobD1lbiZnbD1VUyZ0ej1VVEMmZjU9MjAwMDANCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkwCVNPQ1MJQ0FJDQoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTgwNDAyNzY2OQlWSVNJVE9SX0lORk8xX0xJVkUJMWpBZHZRYURSR1ENCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODA0MDI3NjY5CVZJU0lUT1JfUFJJVkFDWV9NRVRBREFUQQlDZ0pDVWhJRUdnQWdRUSUzRCUzRA0KLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTAJWVNDCWpBS3FIWkdHeENVDQoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTgxOTc0MDQzMQlfX1NlY3VyZS0xUFNJRFRTCXNpZHRzLUNqVUJYTXc0MVVrTVVpY3RyX3ZITmVBZFh0cV8zVmo2Sk5HVWZqc0c5RENiSmZneE1UUkxaVkg0UExVdjh6ODNjTWRNTzhicUV4QUENCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODIxNzg0NTk4CV9fU2VjdXJlLTNQQVBJU0lECXRnak1FWFhRb0ZpV1lxb20vQUREQk9XNjhmOXFXVmw5YUQNCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODIxNzg0NTk4CV9fU2VjdXJlLTNQU0lECWcuYTAwMEJ3bGFQMUpSU2RNZDB5aEdOYVJLdFhKTWFoV0tSbVA2Ym9QMTdid25OX1dEcnJWMEh5Smd5TGdHcFdYMTNsSEFNUTBRM3FBQ2dZS0FTb1NBUk1TRlFIR1gyTWlneGU1YTF4SlR2S1dUeEQzdXR6TGhob1ZBVUY4eUtydEViTFJ3anJPeDl3azBMMzBrdk4zMDA3Ng0KLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MTk3NDA4NjYJX19TZWN1cmUtM1BTSURDQwlBS0V5WHpYcEtzQlRzVmE4R19BT0QyZWwtd05nV04tOXQxRlhtTEZVV3ZTRms0cFZoNWtMWWxUOW9RcldhUWxvM0RtbzEzZlppMG5DDQoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTgxOTc0MDQzMQlfX1NlY3VyZS0zUFNJRFRTCXNpZHRzLUNqVUJYTXc0MVVrTVVpY3RyX3ZITmVBZFh0cV8zVmo2Sk5HVWZqc0c5RENiSmZneE1UUkxaVkg0UExVdjh6ODNjTWRNTzhicUV4QUENCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxNzkxMTM3OTk2CV9fU2VjdXJlLUJVQ0tFVAlDTllGDQoueW91dHViZS5jb20JVFJVRQkvCVRSVUUJMTgwNDAxNjg1MwlfX1NlY3VyZS1ST0xMT1VUX1RPS0VOCUNKbW83NS1zLWU2cTBRRVE0dlc0LUpHOGpBTVlsYk9RNHBiVGxnTSUzRA0KLnlvdXR1YmUuY29tCVRSVUUJLwlUUlVFCTE4MDQwMTY4NTMJX19TZWN1cmUtWU5JRAkyMS5ZVD1KSU1wQndsSEpXUWJtd2pIzU5lY2t4NVZGaEpQTXhRMnpNVHU5ZTMwRzdCeDVoanlIbHJxSVpwRkpYWHNDS0tmc0VQMkVJaVRpTmJGUVFqOUp0R0JPN0xQcFRiQnN0VGY2TFY5bjVqb0YyYkRJaVRvMVhuOXdUSENVWHlZWFhrSkRnb2F5ZmpYWTg3b0VKWnpWNWVZU1k5TGnsINXo0RWhYXzlsRXJDTUs3aFRqTGt1bldsSU5wR2NNY2ZPNk4zX0FfYTZNVjJPbElrZmMwcWJIZUlkdFNpemNzUVZLbWZFX0FmYmNfb3VCMnVqam8xWXFfemtXcklDSkpTZ253cTB1V205RnJlQ2dhbU5ZYXFZOXVFdkRxeXlwRkh4Q1h2NEhhSzEyWXF3VlRsZ0plOG9fNVh5UlpHdDFsSHA2bmwxN3dwa1JkLWcNCi55b3V0dWJlLmNvbQlUUlVFCS8JVFJVRQkxODUxNTM0NDM4CV9fU2VjdXJlLVlUX1RWRkFTCXQ9NDg0MzU5JnM9Mg0KLnlvdXR1YmUuY29tCVRSVUUJLwlGQUxTRQkxODIyNjU4MTMwCV9nYQlHQTEuMS44ODcyNzg20OS4MTc4ODA5ODEzMA0KLnlvdXR1YmUuY29tCVRSVUUJLwlGQUxTRQkxODIyNjc0NDM3CV9nYV9WQ0dFUFk0MFZCCUdTMi4xLnMxNzg4MTE0NDM3JG8yJGcwJHQxNzg4MTE0NDM3JGo2MCRsMCRoMA0KLnlvdXR1YmUuY29tCVRSVUUJLwlGQUxTRQkxNzk1ODc0MTMwCV9nY2xfYXUJMS4xLjE5MzIzNTUxMTQuMTc4ODA5ODEzMC4tLi0uMTc4ODA5ODEzMC4yMDA1NDY1NTQ0LjE3ODgwOTgxMzAuMTc4ODA5ODEzMA0KLnlvdXR1YmUuY29tCVRSVUUJL3R2CVRSVUUJMTgyMTI5NDQzOAlfX1NlY3VyZS1ZVF9ERVJQCUNKWENvdlhxQXclM0QlM0QNCnd3dy55b3V0dWJlLmNvbQlGQUxTRQkvCVRSVUUJMTc4ODcxNDQ3NQlPVFoJODczMDMwOF82OF82NF83MzU2MF82OF80MTYzNDANCnd3dy55b3V0dWJlLmNvbQlGQUxTRQkvCUZBTFNFCTE4MTk2NDMxMTAJdGItc2VhcmNoLXRlcm0tYW5hbHlzaXMtYWN0aW9uCWNsaXBib2FyZCU3Q3VuZGVmaW5lZCU3Q3VuZGVmaW5lZA0K"
-
-COOKIE_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
-try:
-    decoded_cookies = base64.b64decode(EMBEDDED_COOKIES_B64).decode("utf-8", errors="ignore").replace("\r\n", "\n")
-    with open(COOKIE_PATH, "w", encoding="utf-8", newline="\n") as f:
-        f.write(decoded_cookies)
-    print("Loaded embedded cookies.txt with Unix LF line endings.")
-except Exception as e:
-    print(f"Error loading cookies: {e}")
-
-HAS_COOKIES = os.path.exists(COOKIE_PATH)
+RESIDENTIAL_PROXY_URL = os.environ.get("WEBSHARE_PROXY_URL") or os.environ.get("RESIDENTIAL_PROXY_URL") or "http://fed63918541e5361b7c1:13e29a40e6a9106d@sv1.allanproxys.com:10000"
+HAS_PROXY = bool(RESIDENTIAL_PROXY_URL and RESIDENTIAL_PROXY_URL.strip())
 
 CHROME_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -58,8 +47,8 @@ def get_ytdl_search_opts(limit: int = 15):
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
+    if HAS_PROXY:
+        opts['proxy'] = RESIDENTIAL_PROXY_URL
     return opts
 
 def get_ytdl_extract_opts():
@@ -71,8 +60,8 @@ def get_ytdl_extract_opts():
         'http_headers': CHROME_HEADERS,
         'extractor_args': FAST_YTDL_ARGS,
     }
-    if HAS_COOKIES:
-        opts['cookiefile'] = COOKIE_PATH
+    if HAS_PROXY:
+        opts['proxy'] = RESIDENTIAL_PROXY_URL
     return opts
 
 def parse_tracks(results):
@@ -99,20 +88,24 @@ def health_check():
     return {
         "status": "ok",
         "app": "Azannas Music Engine",
-        "mode": "fallback",
-        "version": "9.2.0"
+        "has_proxy": HAS_PROXY,
+        "mode": "proxy" if HAS_PROXY else "fallback",
+        "version": "10.0.0"
     }
 
 @app.get("/version")
 def version_check():
     return {
-        "version": "9.2.0",
-        "mode": "fallback"
+        "version": "10.0.0",
+        "mode": "proxy" if HAS_PROXY else "fallback",
+        "has_proxy": HAS_PROXY
     }
 
 @app.get("/mode")
 def get_engine_mode():
-    return {"mode": "fallback", "description": "Conexão Direta Multicliente (Luz Amarela Neon)"}
+    if HAS_PROXY:
+        return {"mode": "proxy", "description": "Conectado via Proxy Residencial BR (AllanProxies - Luz Azul Neon)"}
+    return {"mode": "fallback", "description": "Conexão Direta (Luz Amarela Neon)"}
 
 @app.get("/search")
 def search_tracks(q: str = Query(..., description="Termo de busca")):
@@ -121,7 +114,7 @@ def search_tracks(q: str = Query(..., description="Termo de busca")):
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch15:{q}", download=False)
             tracks = parse_tracks(results)
-            return {"query": q, "results": tracks, "mode": "fallback"}
+            return {"query": q, "results": tracks, "mode": "proxy" if HAS_PROXY else "fallback"}
     except Exception as e:
         print("Search error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -141,7 +134,7 @@ def get_stream_url(track_id: str):
                     "duration": res.get("duration"),
                     "thumbnail_url": res.get("thumbnail") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg",
                     "stream_url": res.get("url"),
-                    "mode": "fallback"
+                    "mode": "proxy" if HAS_PROXY else "fallback"
                 }
         raise HTTPException(status_code=404, detail="Stream não localizado.")
     except Exception as e:
