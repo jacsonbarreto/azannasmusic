@@ -39,7 +39,7 @@ class TestAlexaWebhook(unittest.TestCase):
         speech = data.get("response", {}).get("outputSpeech", {}).get("text", "")
         print(f"\n[TEST 1 - Speech]: {speech}")
         self.assertIn("Tocando", speech)
-        self.assertIn("o player do jackin lindão e das annas", speech)
+        self.assertIn("o player do jaquinho lindão e das annas", speech)
 
         # Verificar diretiva AudioPlayer.Play REPLACE_ALL
         directives = data.get("response", {}).get("directives", [])

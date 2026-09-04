@@ -333,7 +333,7 @@ async def alexa_webhook(request: Request):
                 "response": {
                     "outputSpeech": {
                         "type": "PlainText",
-                        "text": "Bem-vindo ao Azannas Music - o player do jackin lindão e das annas! Qual música ou artista você deseja ouvir?"
+                        "text": "Bem-vindo ao Azannas Music - o player do jaquinho lindão e das annas! Qual música ou artista você deseja ouvir?"
                     },
                     "shouldEndSession": False
                 }
@@ -384,7 +384,7 @@ async def alexa_webhook(request: Request):
 
                 title = first_track.get("title", search_term)
                 artist = first_track.get("artist", "Azannas Music")
-                speech = f"Tocando {title} de {artist} no Azannas Music - o player do jackin lindão e das annas."
+                speech = f"Tocando {title} de {artist} no Azannas Music - o player do jaquinho lindão e das annas."
 
                 return create_alexa_stream_response(first_track, "REPLACE_ALL", speech_text=speech)
 
@@ -473,7 +473,7 @@ async def alexa_webhook(request: Request):
                     title = track.get("title", "Música sem título")
                     artist = track.get("artist", "Artista desconhecido")
                     offset = session.get("stopped_offset", 0)
-                    speech = f"Você está ouvindo {title} de {artist} no Azannas Music - o player do jackin lindão e das annas."
+                    speech = f"Você está ouvindo {title} de {artist} no Azannas Music - o player do jaquinho lindão e das annas."
                     return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech, offset_ms=offset)
                 return {
                     "version": "1.0",
