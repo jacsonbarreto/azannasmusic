@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-RESIDENTIAL_PROXY_URL = os.environ.get("WEBSHARE_PROXY_URL") or os.environ.get("RESIDENTIAL_PROXY_URL") or "http://fed63918541e5361b7c1:13e29a40e6a9106d@sv1.allanproxys.com:10000"
+RESIDENTIAL_PROXY_URL = os.environ.get("WEBSHARE_PROXY_URL") or os.environ.get("RESIDENTIAL_PROXY_URL") or "http://fed63918541e5361b7c1:13e29a40e6a9106d@sv1.allanproxys.com:824"
 HAS_PROXY = bool(RESIDENTIAL_PROXY_URL and RESIDENTIAL_PROXY_URL.strip())
 
 CHROME_HEADERS = {
