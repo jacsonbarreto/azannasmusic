@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "meu azannas",
+      "invocationName": "minha caixinha",
       "intents": [
         {
           "name": "AMAZON.CancelIntent",
@@ -33,6 +33,10 @@
         },
         {
           "name": "AMAZON.StartOverIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
           "samples": []
         },
         {
