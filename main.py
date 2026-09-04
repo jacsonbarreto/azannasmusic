@@ -318,6 +318,62 @@ def alexa_stream_proxy(track_id: str, request: Request):
         print(f"Alexa Stream Redirect Error for {track_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def handle_what_is_playing(body: dict, device_id: str):
+    """Responde qual música está tocando no momento com máxima precisão e resiliência."""
+    session = alexa_sessions.get(device_id)
+    
+    # Extrair offset e token diretamente do contexto AudioPlayer enviado pela Alexa
+    audio_context = body.get("context", {}).get("AudioPlayer", {})
+    offset_ms = audio_context.get("offsetInMilliseconds", 0)
+    token = audio_context.get("token", "")
+
+    if not offset_ms and session:
+        offset_ms = session.get("stopped_offset", 0)
+        if session.get("started_at"):
+            import time
+            elapsed = int((time.time() - session["started_at"]) * 1000)
+            offset_ms = max(offset_ms, elapsed)
+
+    if session and session.get("queue"):
+        curr_idx = session.get("current_index", 0)
+        track = session["queue"][curr_idx]
+        title = track.get("title", "Música sem título")
+        artist = track.get("artist", "Artista desconhecido")
+        speech = f"Você está ouvindo {title} de {artist} no Azannas Music - o player do jaquinho lindão e das annas."
+        return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech, offset_ms=offset_ms)
+
+    # Fallback caso a sessão tenha sido reiniciada no servidor durante a reprodução
+    if token:
+        track_id = token.split("___")[0]
+        try:
+            opts = get_ytdl_extract_opts()
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                res = ydl.extract_info(f"https://www.youtube.com/watch?v={track_id}", download=False)
+                if res:
+                    title = res.get("title", "Música sem título")
+                    artist = res.get("uploader", "Artista desconhecido")
+                    track = {
+                        "id": track_id,
+                        "title": title,
+                        "artist": artist,
+                        "thumbnail_url": res.get("thumbnail")
+                    }
+                    speech = f"Você está ouvindo {title} de {artist} no Azannas Music - o player do jaquinho lindão e das annas."
+                    return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech, offset_ms=offset_ms)
+        except Exception as e:
+            print("WhatIsPlaying fallback error:", e)
+
+    return {
+        "version": "1.0",
+        "response": {
+            "outputSpeech": {
+                "type": "PlainText",
+                "text": "Nenhuma música está tocando no momento no Azannas Music."
+            },
+            "shouldEndSession": True
+        }
+    }
+
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
     """Alexa Custom Skill Webhook avançado com suporte a Rádio Infinita, Filas e Controles de Voz."""
@@ -347,6 +403,15 @@ async def alexa_webhook(request: Request):
                 slots = intent.get("slots", {})
                 query_slot = slots.get("query", {}) or slots.get("song", {}) or slots.get("artist", {})
                 search_term = query_slot.get("value", "").strip()
+
+                what_is_playing_keywords = [
+                    "que musica", "que música", "qual e essa", "qual é essa",
+                    "qual o nome", "quem canta", "nome da musica", "nome da música",
+                    "qual musica", "qual música", "que faixa", "qual a musica", "qual a música"
+                ]
+
+                if any(k in search_term.lower() for k in what_is_playing_keywords):
+                    return handle_what_is_playing(body, device_id)
 
                 if not search_term:
                     return {
@@ -465,26 +530,8 @@ async def alexa_webhook(request: Request):
                     }
                 }
 
-            elif intent_name == "WhatIsPlayingIntent":
-                session = alexa_sessions.get(device_id)
-                if session and session.get("queue"):
-                    curr_idx = session.get("current_index", 0)
-                    track = session["queue"][curr_idx]
-                    title = track.get("title", "Música sem título")
-                    artist = track.get("artist", "Artista desconhecido")
-                    offset = session.get("stopped_offset", 0)
-                    speech = f"Você está ouvindo {title} de {artist} no Azannas Music - o player do jaquinho lindão e das annas."
-                    return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech, offset_ms=offset)
-                return {
-                    "version": "1.0",
-                    "response": {
-                        "outputSpeech": {
-                            "type": "PlainText",
-                            "text": "Nenhuma música está tocando no momento no Azannas Music."
-                        },
-                        "shouldEndSession": True
-                    }
-                }
+            elif intent_name in ["WhatIsPlayingIntent", "GetTrackNameIntent"]:
+                return handle_what_is_playing(body, device_id)
 
             elif intent_name == "AMAZON.HelpIntent":
                 return {
@@ -524,11 +571,14 @@ async def alexa_webhook(request: Request):
         elif req_type == "AudioPlayer.PlaybackStarted":
             token = req_data.get("token", "")
             session = alexa_sessions.get(device_id)
-            if session and session.get("queue") and token:
-                for idx, t in enumerate(session["queue"]):
-                    if t["id"] in token:
-                        session["current_index"] = idx
-                        break
+            if session:
+                import time
+                session["started_at"] = time.time()
+                if session.get("queue") and token:
+                    for idx, t in enumerate(session["queue"]):
+                        if t["id"] in token:
+                            session["current_index"] = idx
+                            break
             return {"version": "1.0", "response": {}}
 
         elif req_type == "AudioPlayer.PlaybackStopped":
