@@ -9,8 +9,8 @@ import requests
 
 app = FastAPI(
     title="Azannas Music Engine API",
-    description="Motor de busca, extração e streaming sem anúncios (AllanProxies BR Engine v10.0.0)",
-    version="10.0.0"
+    description="Motor de busca, extração e streaming sem anúncios (AllanProxies BR Engine v10.1.0)",
+    version="10.1.0"
 )
 
 app.add_middleware(
@@ -21,8 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-RESIDENTIAL_PROXY_URL = os.environ.get("WEBSHARE_PROXY_URL") or os.environ.get("RESIDENTIAL_PROXY_URL") or "http://fed63918541e5361b7c1:13e29a40e6a9106d@sv1.allanproxys.com:824"
-HAS_PROXY = bool(RESIDENTIAL_PROXY_URL and RESIDENTIAL_PROXY_URL.strip())
+RESIDENTIAL_PROXY_URL = "http://fed63918541e5361b7c1:13e29a40e6a9106d@sv1.allanproxys.com:824"
+HAS_PROXY = True
 
 CHROME_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
