@@ -235,6 +235,68 @@ def get_lyrics(query: str = "", artist: str = "", title: str = ""):
         print("Lyrics search error:", e)
         return {"status": "error", "detail": str(e)}
 
+alexa_sessions = {}
+
+def get_alexa_device_id(body: dict) -> str:
+    """Extrai o ID único do dispositivo ou usuário da Alexa."""
+    context = body.get("context", {})
+    device_id = context.get("System", {}).get("device", {}).get("deviceId")
+    if not device_id:
+        device_id = context.get("System", {}).get("user", {}).get("userId", "default_alexa_device")
+    return device_id
+
+def create_alexa_stream_response(track: dict, play_behavior: str = "REPLACE_ALL", speech_text: str = None, expected_prev_token: str = None, offset_ms: int = 0):
+    """Gera uma resposta padronizada da API AudioPlayer da Alexa."""
+    track_id = track.get("id")
+    title = track.get("title", "Música")
+    artist = track.get("artist", "Azannas Music")
+    thumb = track.get("thumbnail_url") or f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg"
+    stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{track_id}"
+    token = f"{track_id}___{offset_ms}"
+
+    stream_data = {
+        "token": token,
+        "url": stream_url,
+        "offsetInMilliseconds": offset_ms
+    }
+    if expected_prev_token and play_behavior == "ENQUEUE":
+        stream_data["expectedPreviousToken"] = expected_prev_token
+
+    directive = {
+        "type": "AudioPlayer.Play",
+        "playBehavior": play_behavior,
+        "audioItem": {
+            "stream": stream_data,
+            "metadata": {
+                "title": title,
+                "subtitle": artist,
+                "art": {
+                    "sources": [{"url": thumb}]
+                }
+            }
+        }
+    }
+
+    res_body = {"directives": [directive]}
+    if speech_text and play_behavior != "ENQUEUE":
+        res_body["outputSpeech"] = {
+            "type": "PlainText",
+            "text": speech_text
+        }
+        res_body["shouldEndSession"] = True
+
+    return {
+        "version": "1.0",
+        "response": res_body
+    }
+
+def fetch_tracks_for_alexa_radio(query: str, limit: int = 15):
+    """Busca faixas relevantes para gerar a fila do modo rádio da Alexa."""
+    opts = get_ytdl_search_opts(limit=limit)
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        res = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+        return parse_tracks(res)
+
 @app.get("/alexa-stream/{track_id}")
 def alexa_stream_proxy(track_id: str, request: Request):
     """Redireciona a Alexa diretamente para o CDN do YouTube (googlevideo.com)."""
@@ -258,11 +320,12 @@ def alexa_stream_proxy(track_id: str, request: Request):
 
 @app.post("/alexa")
 async def alexa_webhook(request: Request):
-    """Alexa Custom Skill Webhook com resposta ultrarrápida e redirecionamento de streaming."""
+    """Alexa Custom Skill Webhook avançado com suporte a Rádio Infinita, Filas e Controles de Voz."""
     try:
         body = await request.json()
         req_data = body.get("request", {})
         req_type = req_data.get("type", "")
+        device_id = get_alexa_device_id(body)
 
         if req_type == "LaunchRequest":
             return {
@@ -297,79 +360,128 @@ async def alexa_webhook(request: Request):
                         }
                     }
 
-                search_opts = get_ytdl_search_opts(limit=5)
-                best_track_id = None
-                title = search_term
-                artist = "Azannas Music"
-                thumb = None
-
-                with yt_dlp.YoutubeDL(search_opts) as ydl:
-                    search_res = ydl.extract_info(f"ytsearch5:{search_term}", download=False)
-                    tracks = parse_tracks(search_res)
-                    if tracks:
-                        best = tracks[0]
-                        best_track_id = best.get("id")
-                        title = best.get("title", search_term)
-                        artist = best.get("artist", "Azannas Music")
-                        thumb = best.get("thumbnail_url")
-
-                if not best_track_id:
+                tracks = fetch_tracks_for_alexa_radio(search_term, limit=15)
+                if not tracks:
                     return {
                         "version": "1.0",
                         "response": {
                             "outputSpeech": {
                                 "type": "PlainText",
-                                "text": f"Desculpe, não encontrei a música {search_term} no Azannas Music."
+                                "text": f"Desculpe, não encontrei faixas para {search_term} no Azannas Music."
                             },
                             "shouldEndSession": True
                         }
                     }
 
-                stream_url = f"https://azannas-music-app.onrender.com/alexa-stream/{best_track_id}"
+                first_track = tracks[0]
+                alexa_sessions[device_id] = {
+                    "query": search_term,
+                    "queue": tracks,
+                    "current_index": 0,
+                    "stopped_offset": 0,
+                    "stopped_token": f"{first_track['id']}___0"
+                }
 
-                if not thumb:
-                    thumb = f"https://i.ytimg.com/vi/{best_track_id}/hqdefault.jpg"
+                title = first_track.get("title", search_term)
+                artist = first_track.get("artist", "Azannas Music")
+                speech = f"Tocando {title} de {artist} e músicas parecidas no Azannas Music."
+
+                return create_alexa_stream_response(first_track, "REPLACE_ALL", speech_text=speech)
+
+            elif intent_name in ["AMAZON.PauseIntent", "AMAZON.StopIntent", "AMAZON.CancelIntent"]:
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "directives": [{"type": "AudioPlayer.Stop"}],
+                        "shouldEndSession": True
+                    }
+                }
+
+            elif intent_name == "AMAZON.ResumeIntent":
+                session = alexa_sessions.get(device_id)
+                if session and session.get("queue"):
+                    curr_idx = session.get("current_index", 0)
+                    track = session["queue"][curr_idx]
+                    offset = session.get("stopped_offset", 0)
+                    return create_alexa_stream_response(track, "REPLACE_ALL", offset_ms=offset)
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": "Nenhuma música pausada no Azannas Music."
+                        },
+                        "shouldEndSession": True
+                    }
+                }
+
+            elif intent_name == "AMAZON.NextIntent":
+                session = alexa_sessions.get(device_id)
+                if session and session.get("queue"):
+                    session["current_index"] += 1
+                    if session["current_index"] >= len(session["queue"]):
+                        try:
+                            more = fetch_tracks_for_alexa_radio(f"{session['query']} radio", limit=10)
+                            existing_ids = {t["id"] for t in session["queue"]}
+                            new_tracks = [t for t in more if t["id"] not in existing_ids]
+                            if new_tracks:
+                                session["queue"].extend(new_tracks)
+                        except Exception as e:
+                            print("NextIntent queue expand error:", e)
+
+                    if session["current_index"] < len(session["queue"]):
+                        track = session["queue"][session["current_index"]]
+                        session["stopped_offset"] = 0
+                        speech = f"Tocando {track.get('title')}."
+                        return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech)
 
                 return {
                     "version": "1.0",
                     "response": {
                         "outputSpeech": {
                             "type": "PlainText",
-                            "text": f"Tocando {title} no Azannas Music."
+                            "text": "Não há próxima música disponível na fila."
                         },
-                        "directives": [
-                            {
-                                "type": "AudioPlayer.Play",
-                                "playBehavior": "REPLACE_ALL",
-                                "audioItem": {
-                                    "stream": {
-                                        "token": best_track_id,
-                                        "url": stream_url,
-                                        "offsetInMilliseconds": 0
-                                    },
-                                    "metadata": {
-                                        "title": title,
-                                        "subtitle": artist,
-                                        "art": {
-                                            "sources": [{"url": thumb}]
-                                        }
-                                    }
-                                }
-                            }
-                        ],
                         "shouldEndSession": True
                     }
                 }
 
-            elif intent_name in ["AMAZON.PauseIntent", "AMAZON.StopIntent", "AMAZON.CancelIntent"]:
+            elif intent_name in ["AMAZON.PreviousIntent", "AMAZON.StartOverIntent"]:
+                session = alexa_sessions.get(device_id)
+                if session and session.get("queue"):
+                    if intent_name == "AMAZON.PreviousIntent":
+                        session["current_index"] = max(0, session.get("current_index", 0) - 1)
+                    track = session["queue"][session["current_index"]]
+                    session["stopped_offset"] = 0
+                    return create_alexa_stream_response(track, "REPLACE_ALL")
                 return {
                     "version": "1.0",
                     "response": {
-                        "directives": [
-                            {
-                                "type": "AudioPlayer.Stop"
-                            }
-                        ],
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": "Não foi possível voltar a música no momento."
+                        },
+                        "shouldEndSession": True
+                    }
+                }
+
+            elif intent_name == "WhatIsPlayingIntent":
+                session = alexa_sessions.get(device_id)
+                if session and session.get("queue"):
+                    curr_idx = session.get("current_index", 0)
+                    track = session["queue"][curr_idx]
+                    title = track.get("title", "Música sem título")
+                    artist = track.get("artist", "Artista desconhecido")
+                    offset = session.get("stopped_offset", 0)
+                    speech = f"Você está ouvindo {title} de {artist} no Azannas Music."
+                    return create_alexa_stream_response(track, "REPLACE_ALL", speech_text=speech, offset_ms=offset)
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": "Nenhuma música está tocando no momento no Azannas Music."
+                        },
                         "shouldEndSession": True
                     }
                 }
@@ -380,24 +492,55 @@ async def alexa_webhook(request: Request):
                     "response": {
                         "outputSpeech": {
                             "type": "PlainText",
-                            "text": "Você pode pedir para tocar qualquer música ou artista na sua caixinha. Por exemplo: fale, Alexa, tocar Legião Urbana na minha caixinha."
+                            "text": "Você pode pedir para tocar qualquer música ou artista no Azannas Music, perguntar qual música está tocando, ou dizer pausar, continuar e próxima."
                         },
                         "shouldEndSession": False
                     }
                 }
 
-        if req_type.startswith("AudioPlayer."):
-            return {
-                "version": "1.0",
-                "response": {}
-            }
+        # Tratar eventos do AudioPlayer
+        if req_type == "AudioPlayer.PlaybackNearlyFinished":
+            session = alexa_sessions.get(device_id)
+            if session and session.get("queue"):
+                curr_idx = session.get("current_index", 0)
+                next_idx = curr_idx + 1
 
-        return {
-            "version": "1.0",
-            "response": {
-                "shouldEndSession": True
-            }
-        }
+                if next_idx >= len(session["queue"]):
+                    try:
+                        more = fetch_tracks_for_alexa_radio(f"{session['query']} radio", limit=10)
+                        existing_ids = {t["id"] for t in session["queue"]}
+                        new_tracks = [t for t in more if t["id"] not in existing_ids]
+                        if new_tracks:
+                            session["queue"].extend(new_tracks)
+                    except Exception as e:
+                        print("PlaybackNearlyFinished queue expand error:", e)
+
+                if next_idx < len(session["queue"]):
+                    curr_track = session["queue"][curr_idx]
+                    next_track = session["queue"][next_idx]
+                    prev_token = f"{curr_track['id']}___{session.get('stopped_offset', 0)}"
+                    return create_alexa_stream_response(next_track, "ENQUEUE", expected_prev_token=prev_token)
+
+        elif req_type == "AudioPlayer.PlaybackStarted":
+            token = req_data.get("token", "")
+            session = alexa_sessions.get(device_id)
+            if session and session.get("queue") and token:
+                for idx, t in enumerate(session["queue"]):
+                    if t["id"] in token:
+                        session["current_index"] = idx
+                        break
+            return {"version": "1.0", "response": {}}
+
+        elif req_type == "AudioPlayer.PlaybackStopped":
+            offset = req_data.get("offsetInMilliseconds", 0)
+            token = req_data.get("token", "")
+            session = alexa_sessions.get(device_id)
+            if session:
+                session["stopped_offset"] = offset
+                session["stopped_token"] = token
+            return {"version": "1.0", "response": {}}
+
+        return {"version": "1.0", "response": {}}
     except Exception as e:
         print("Alexa webhook error:", e)
         return {

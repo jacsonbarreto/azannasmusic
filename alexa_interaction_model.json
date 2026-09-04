@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "azannas music",
+      "invocationName": "meu azannas",
       "intents": [
         {
           "name": "AMAZON.CancelIntent",
@@ -22,6 +22,30 @@
         {
           "name": "AMAZON.ResumeIntent",
           "samples": []
+        },
+        {
+          "name": "AMAZON.NextIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.PreviousIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StartOverIntent",
+          "samples": []
+        },
+        {
+          "name": "WhatIsPlayingIntent",
+          "samples": [
+            "que música está tocando",
+            "que música é essa",
+            "que música tá tocando",
+            "qual é essa música",
+            "qual o nome dessa música",
+            "quem canta essa música",
+            "nome da música"
+          ]
         },
         {
           "name": "PlayMusicIntent",
